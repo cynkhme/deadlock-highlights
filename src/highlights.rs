@@ -215,6 +215,7 @@ mod tests {
             }],
             left_at: None,
             has_paths: true,
+            combat: Vec::new(),
         };
         let t = vod_events(&m, 1000.0, &[], 2000.0);
         let got: Vec<(f64, bool, &str)> = t
@@ -237,6 +238,7 @@ mod tests {
             objectives: vec![],
             left_at: None,
             has_paths: true,
+            combat: Vec::new(),
         };
         let pauses = [Pause {
             game_time_s: 600.0,
@@ -262,6 +264,7 @@ mod tests {
             }],
             left_at: Some(500.0),
             has_paths: true,
+            combat: Vec::new(),
         };
         let t = vod_events(&m, 0.0, &[], 2000.0);
         assert_eq!(
@@ -277,6 +280,7 @@ mod tests {
             objectives: vec![],
             left_at: None,
             has_paths: true,
+            combat: Vec::new(),
         };
         assert_eq!(vod_events(&m, 0.0, &[], 2000.0).len(), 1);
     }

@@ -351,7 +351,7 @@ mod tests {
 
     /// Me (7, slot 1) kills 8 at game time `kill_at`; a path for me unless `paths` is false.
     fn cache_match(f: &Fixture, id: u64, me: u32, paths: bool, kill_at: u32) {
-        let paths = paths.then(|| vec![path(1, &[1000; 1801], &[100; 1801])]);
+        let paths = paths.then(|| vec![path(1, &[1000; 1801], &[100; 1801], &[])]);
         let info = match_info_json(
             1800,
             vec![

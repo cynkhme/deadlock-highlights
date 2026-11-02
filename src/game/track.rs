@@ -94,6 +94,15 @@ impl<'a> Track<'a> {
         (game_time + drift).round() as i64
     }
 
+    /// In combat with players: `combat_type` 1. Undocumented upstream; on 6 matches of one
+    /// streamer, 92 % of the samples that lost 10+ health had 1, and 2 % or less had 2 or 3.
+    pub(crate) fn in_combat(&self, game_time: f64) -> bool {
+        usize::try_from(self.index(game_time))
+            .ok()
+            .and_then(|i| self.path.combat_type.get(i))
+            == Some(&1)
+    }
+
     /// Alive and within the assist radius of `pos` at some second of the assist window.
     pub(crate) fn near(&self, game_time: f64, pos: &Pos) -> bool {
         let i = self.index(game_time);
@@ -129,7 +138,7 @@ mod tests {
         match_info(
             duration,
             vec![player(1, 1, 0, &deaths), player(2, 2, 1, &[])],
-            Some(vec![path(1, &vec![5000; len], &health)]),
+            Some(vec![path(1, &vec![5000; len], &health, &[])]),
             &json!({}),
         )
     }
@@ -192,7 +201,7 @@ mod tests {
         let m = match_info(
             100,
             vec![player(1, 1, 0, &[])],
-            Some(vec![path(1, &xs, &health)]),
+            Some(vec![path(1, &xs, &health, &[])]),
             &json!({}),
         );
         let t = Track::new(&m, &m.players[0]).unwrap();
@@ -216,7 +225,7 @@ mod tests {
         let m = match_info(
             100,
             vec![player(1, 1, 0, &[])],
-            Some(vec![path(1, &xs, &health)]),
+            Some(vec![path(1, &xs, &health, &[])]),
             &json!({}),
         );
         let t = Track::new(&m, &m.players[0]).unwrap();
@@ -250,5 +259,53 @@ mod tests {
     fn no_paths_no_track() {
         let m = match_info(100, vec![player(1, 1, 0, &[])], None, &json!({}));
         assert!(Track::new(&m, &m.players[0]).is_none());
+    }
+
+    #[test]
+    fn in_combat_reads_the_drifted_index() {
+        // No own death: index(t) = t + 1.
+        let mut combat = vec![0; 100];
+        combat[51] = 1;
+        let m = match_info(
+            100,
+            vec![player(1, 1, 0, &[]), player(2, 2, 1, &[])],
+            Some(vec![path(1, &[5000; 100], &[100; 100], &combat)]),
+            &json!({}),
+        );
+        let t = Track::new(&m, &m.players[0]).unwrap();
+        assert!(t.in_combat(50.0));
+        assert!(!t.in_combat(49.0));
+        assert!(!t.in_combat(51.0));
+
+        // An own death at game 30 whose zero run starts at sample 35 pins drift 5.
+        let mut health = vec![100; 100];
+        health[35..45].fill(0);
+        let mut combat = vec![0; 100];
+        combat[45] = 1;
+        let m = match_info(
+            100,
+            vec![
+                player(1, 1, 0, &[(30, Some(2), Some(0.0))]),
+                player(2, 2, 1, &[]),
+            ],
+            Some(vec![path(1, &[5000; 100], &health, &combat)]),
+            &json!({}),
+        );
+        let t = Track::new(&m, &m.players[0]).unwrap();
+        assert_eq!(t.index(40.0), 45);
+        assert!(t.in_combat(40.0));
+    }
+
+    #[test]
+    fn in_combat_out_of_range_is_false() {
+        let m = match_info(
+            100,
+            vec![player(1, 1, 0, &[])],
+            Some(vec![path(1, &[5000; 100], &[100; 100], &[1; 100])]),
+            &json!({}),
+        );
+        let t = Track::new(&m, &m.players[0]).unwrap();
+        assert!(t.in_combat(10.0));
+        assert!(!t.in_combat(500.0));
     }
 }

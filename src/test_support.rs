@@ -3,13 +3,19 @@
 use deadlock_api::MatchInfo;
 use serde_json::{Value, json};
 
-/// One path sample per second: x position (y = 0) and health.
-pub(crate) fn path(slot: u32, xs: &[u32], health: &[u32]) -> Value {
+/// One path sample per second: x position (y = 0), health and combat type. An empty `combat`
+/// leaves the key out, as some matches do.
+pub(crate) fn path(slot: u32, xs: &[u32], health: &[u32], combat: &[u32]) -> Value {
     assert_eq!(xs.len(), health.len());
-    json!({
+    let mut p = json!({
         "player_slot": slot, "x_min": 0.0, "y_min": 0.0, "x_max": 10000.0, "y_max": 10000.0,
         "x_pos": xs, "y_pos": vec![0; xs.len()], "health": health,
-    })
+    });
+    if !combat.is_empty() {
+        assert_eq!(combat.len(), xs.len());
+        p["combat_type"] = json!(combat);
+    }
+    p
 }
 
 /// A player; `deaths` are (game time, killer slot, death x).

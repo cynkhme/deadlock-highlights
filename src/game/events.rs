@@ -39,6 +39,9 @@ pub(crate) struct MatchEvents {
     /// Set when the streamer left well before the end: later events are not on the stream.
     pub left_at: Option<f64>,
     pub has_paths: bool,
+    /// Whole game seconds the streamer is in combat with players, ascending, up to `left_at`
+    /// or the match end.
+    pub combat: Vec<f64>,
 }
 
 /// What happened in the match on `me`'s side; `me` is one of `info.players`.
@@ -118,11 +121,19 @@ pub(crate) fn events(
         .as_ref()
         .map(Track::last_game_time)
         .filter(|&t| t < duration - 60.0);
+    let last = left_at.unwrap_or(duration).floor() as u32;
+    let combat = track.as_ref().map_or_else(Vec::new, |tr| {
+        (0..=last)
+            .map(f64::from)
+            .filter(|&t| tr.in_combat(t))
+            .collect()
+    });
     MatchEvents {
         kills,
         objectives,
         left_at,
         has_paths: track.is_some(),
+        combat,
     }
 }
 
@@ -139,7 +150,16 @@ mod tests {
         deaths_of_enemy: &[(u32, Option<u32>, Option<f64>)],
         my_deaths: &[(u32, Option<u32>, Option<f64>)],
     ) -> MatchInfo {
-        let n = 1000;
+        info_with(deaths_of_enemy, my_deaths, 1000, &[])
+    }
+
+    /// [`info`] with `n` path samples and the streamer's combat types.
+    fn info_with(
+        deaths_of_enemy: &[(u32, Option<u32>, Option<f64>)],
+        my_deaths: &[(u32, Option<u32>, Option<f64>)],
+        n: usize,
+        combat: &[u32],
+    ) -> MatchInfo {
         match_info(
             999,
             vec![
@@ -148,7 +168,7 @@ mod tests {
                 player(3, 3, 1, deaths_of_enemy),
                 player(4, 4, 1, &[]),
             ],
-            Some(vec![path(1, &vec![1000; n], &vec![100; n])]),
+            Some(vec![path(1, &vec![1000; n], &vec![100; n], combat)]),
             &json!({
                 "objectives": [
                     {"team_objective_id": 7, "team": 1, "destroyed_time_s": 300},
@@ -263,5 +283,33 @@ mod tests {
                 (500.0, "mid boss".to_owned(), true),
             ]
         );
+    }
+
+    #[test]
+    fn combat_seconds_of_the_streamer() {
+        // No own death: index(t) = t + 1, so samples 101..=103 are game seconds 100..=102.
+        let mut combat = vec![0; 1000];
+        combat[101..=103].fill(1);
+        let m = info_with(&[], &[], 1000, &combat);
+        let e = events(&m, &m.players[0], &names());
+        assert_eq!(e.combat, vec![100.0, 101.0, 102.0]);
+    }
+
+    #[test]
+    fn empty_combat_type_gives_no_combat() {
+        let m = info(&[(100, Some(2), Some(1000.0))], &[]);
+        let e = events(&m, &m.players[0], &names());
+        assert_eq!(e.combat, Vec::<f64>::new());
+        assert!(e.has_paths);
+        assert!(e.kills[0].my_assist);
+    }
+
+    #[test]
+    fn combat_stops_at_left_at() {
+        // 300 samples in a 999 s match: the streamer left at game 298.
+        let m = info_with(&[], &[], 300, &[1; 300]);
+        let e = events(&m, &m.players[0], &names());
+        assert_eq!(e.left_at, Some(298.0));
+        assert_eq!(e.combat.last(), Some(&298.0));
     }
 }

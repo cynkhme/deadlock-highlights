@@ -169,7 +169,7 @@ mod tests {
 
     /// Me (account 7) and account 8; a path for me unless `paths` is false.
     fn metadata(me: u32, paths: bool) -> String {
-        let paths = paths.then(|| vec![path(1, &[0; 10], &[100; 10])]);
+        let paths = paths.then(|| vec![path(1, &[0; 10], &[100; 10], &[])]);
         let info = match_info_json(
             1800,
             vec![
