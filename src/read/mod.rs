@@ -1,5 +1,7 @@
 //! Stage 4: the clock read on every keyframe that passes the gate (spec section 3).
 
+pub(crate) mod openai;
+
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
