@@ -5,6 +5,7 @@ mod align;
 mod clock;
 mod config;
 mod error;
+mod place;
 mod profile;
 
 pub use config::{Config, Progress};
