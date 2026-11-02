@@ -23,7 +23,7 @@ pub(crate) const LONE_OWN_KILL_DENSITY: f64 =
 
 /// The match's scoring events on the VOD, in VOD order: kills near the streamer and
 /// objectives, up to the end of the streamer's stream of the match.
-pub(crate) fn timeline(
+pub(crate) fn vod_events(
     ev: &MatchEvents,
     vod_start: f64,
     pauses: &[Pause],
@@ -31,7 +31,7 @@ pub(crate) fn timeline(
 ) -> Vec<Event> {
     let stream_end = ev.left_at.unwrap_or(duration_s);
     let at = |game_time: f64| vod_start + elapsed(game_time, pauses);
-    let kills = ev.kills.iter().filter(|k| k.near).map(|k| Event {
+    let kills = ev.kills.iter().filter(|k| k.scored).map(|k| Event {
         vod_time: at(k.game_time),
         game_time: k.game_time,
         label: format!("{} > {}", k.killer, k.victim),
@@ -117,7 +117,7 @@ mod tests {
         }
     }
 
-    fn kill(game_time: f64, near: bool) -> Kill {
+    fn kill(game_time: f64, scored: bool) -> Kill {
         Kill {
             game_time,
             killer: "a".into(),
@@ -125,7 +125,7 @@ mod tests {
             my_kill: false,
             my_death: false,
             my_assist: false,
-            near,
+            scored,
         }
     }
 
@@ -216,7 +216,7 @@ mod tests {
             left_at: None,
             has_paths: true,
         };
-        let t = timeline(&m, 1000.0, &[], 2000.0);
+        let t = vod_events(&m, 1000.0, &[], 2000.0);
         let got: Vec<(f64, bool, &str)> = t
             .iter()
             .map(|e| (e.vod_time, e.objective, e.label.as_str()))
@@ -242,7 +242,7 @@ mod tests {
             game_time_s: 600.0,
             duration_s: 30.0,
         }];
-        let t = timeline(&m, -20.0, &pauses, 2000.0);
+        let t = vod_events(&m, -20.0, &pauses, 2000.0);
         assert_eq!(
             t.iter()
                 .map(|e| (e.vod_time, e.game_time))
@@ -263,7 +263,7 @@ mod tests {
             left_at: Some(500.0),
             has_paths: true,
         };
-        let t = timeline(&m, 0.0, &[], 2000.0);
+        let t = vod_events(&m, 0.0, &[], 2000.0);
         assert_eq!(
             t.iter().map(|e| e.game_time).collect::<Vec<_>>(),
             [10.0, 500.0]
@@ -278,7 +278,7 @@ mod tests {
             left_at: None,
             has_paths: true,
         };
-        assert_eq!(timeline(&m, 0.0, &[], 2000.0).len(), 1);
+        assert_eq!(vod_events(&m, 0.0, &[], 2000.0).len(), 1);
     }
 
     #[test]

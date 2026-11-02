@@ -20,8 +20,9 @@ pub(crate) struct Kill {
     pub my_kill: bool,
     pub my_death: bool,
     pub my_assist: bool,
-    /// Counts for the score: the streamer's own kill or death, or a death near the streamer.
-    pub near: bool,
+    /// Counts for the score: the streamer's own kill or death, or a death near the streamer or
+    /// at a distance that cannot be judged.
+    pub scored: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,7 +81,7 @@ pub(crate) fn events(
                 my_death,
                 my_assist: ally_kill && close == Some(true),
                 // Without a path or a death position proximity cannot be judged, so the death counts.
-                near: my_kill || my_death || close != Some(false),
+                scored: my_kill || my_death || close != Some(false),
             });
         }
     }
@@ -200,14 +201,14 @@ mod tests {
     fn distant_death_not_near() {
         let m = info(&[(100, Some(2), Some(9000.0))], &[]);
         let e = events(&m, &m.players[0], &names());
-        assert!(!e.kills[0].near && !e.kills[0].my_assist);
+        assert!(!e.kills[0].scored && !e.kills[0].my_assist);
     }
 
     #[test]
     fn death_without_pos_kept() {
         let m = info(&[(100, Some(2), None), (120, None, None)], &[]);
         let e = events(&m, &m.players[0], &names());
-        assert!(e.kills.iter().all(|k| k.near && !k.my_assist));
+        assert!(e.kills.iter().all(|k| k.scored && !k.my_assist));
         assert_eq!(e.kills[1].killer, "(non-player)");
     }
 
@@ -215,7 +216,7 @@ mod tests {
     fn own_death_is_near_and_mine() {
         let m = info(&[], &[(150, Some(3), Some(8000.0))]);
         let e = events(&m, &m.players[0], &names());
-        assert!(e.kills[0].my_death && e.kills[0].near);
+        assert!(e.kills[0].my_death && e.kills[0].scored);
     }
 
     #[test]
@@ -224,7 +225,7 @@ mod tests {
         m.match_paths = None;
         let e = events(&m, &m.players[0], &names());
         assert!(!e.has_paths);
-        assert!(e.kills[0].near && !e.kills[0].my_assist);
+        assert!(e.kills[0].scored && !e.kills[0].my_assist);
         assert_eq!(e.left_at, None);
     }
 

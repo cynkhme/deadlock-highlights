@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::hud::profile::{BAND_H, BAND_W};
 
 /// Pixels at or above this are glyph strokes; the templates were cut at the same value.
-const THR: u8 = 150;
+const STROKE_MIN: u8 = 150;
 const SCALES: [f64; 5] = [0.85, 0.92, 1.0, 1.08, 1.16];
 /// Chains of 4 glyphs (`0:09`) and of 5 (`14:39`).
 const CHAIN_LENGTHS: [usize; 2] = [4, 5];
@@ -64,7 +64,7 @@ impl Gate {
         assert_eq!(gray.len(), bw * bh, "a {bw}x{bh} band");
         let img: Vec<f64> = gray
             .iter()
-            .map(|&v| f64::from(u8::from(v >= THR)))
+            .map(|&v| f64::from(u8::from(v >= STROKE_MIN)))
             .collect();
         let mut best = -1.0_f64;
         for classes in &self.scaled {

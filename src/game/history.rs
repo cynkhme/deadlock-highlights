@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::timeline::align::{ANCHOR_WINDOW_S, HistMatch};
+use crate::timeline::align::{ANCHOR_WINDOW_S, HistoryMatch};
 use crate::video::Probe;
 
 /// An info.json whose duration differs from the VOD's by more than this describes
@@ -28,7 +28,7 @@ pub enum AnchorSource {
 
 #[derive(Debug)]
 pub(crate) struct History {
-    pub matches: Vec<HistMatch>,
+    pub matches: Vec<HistoryMatch>,
     /// The VOD's start as unix seconds.
     pub anchor: Option<(i64, AnchorSource)>,
 }
@@ -62,10 +62,10 @@ pub(crate) fn load_history(
         return Err(Error::History(format!("account {n} has no match history")));
     }
     // An entry without a start cannot be placed on the wall clock.
-    let matches: Vec<HistMatch> = entries
+    let matches: Vec<HistoryMatch> = entries
         .iter()
         .filter_map(|e| {
-            Some(HistMatch {
+            Some(HistoryMatch {
                 match_id: e.match_id.0,
                 start_time: i64::try_from(e.start_time?).ok()?,
                 duration_s: e.match_duration_s.unwrap_or(0),

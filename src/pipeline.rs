@@ -10,22 +10,22 @@ use crate::config::{Config, Progress};
 use crate::error::{Error, Result};
 use crate::game::fetch::{Fetched, Fetcher, MIN_MATCH_S, STANDARD_MODE, is_cached};
 use crate::game::history::{History, load_history};
-use crate::highlights::{rank, timeline, windows};
+use crate::highlights::{rank, vod_events, windows};
 use crate::hud::cache;
 use crate::hud::clock::ClockReading;
 use crate::hud::gate::Gate;
 use crate::hud::reader::{
-    FrameReading, HudReader, SystemClock, clock_readings, read_frames, require_clock,
+    FrameReading, HudReader, RealTime, clock_readings, read_frames, require_clock,
 };
 use crate::output::{
     Alignment, ClockSegment, Degraded, Highlight, MatchReport, MatchStatus, Output, SCHEMA,
     UnseenMatch, VodInfo,
 };
-use crate::timeline::align::{HistMatch, Start, align_readings};
+use crate::timeline::align::{GameStart, HistoryMatch, align_readings};
 use crate::timeline::place::{pause_mismatch, vod_start};
 use crate::video::{GRID_S, Probe, cut_clip, keyframes};
 
-fn report(cfg: &Config, p: Progress) {
+fn notify(cfg: &Config, p: Progress) {
     if let Some(f) = &cfg.progress {
         f(p);
     }
@@ -45,7 +45,7 @@ fn prepare(
     probe: &Probe,
     transport: Option<Box<dyn Transport>>,
 ) -> Result<(Client, History)> {
-    report(
+    notify(
         cfg,
         Progress::Probed {
             duration_s: probe.duration_s,
@@ -56,8 +56,8 @@ fn prepare(
         source,
     })?;
     let api = crate::game::api::client(cfg, transport)?;
-    let history = load_history(&api, cfg, probe, &|w| report(cfg, Progress::Warning(w)))?;
-    report(
+    let history = load_history(&api, cfg, probe, &|w| notify(cfg, Progress::Warning(w)))?;
+    notify(
         cfg,
         Progress::History {
             matches: history.matches.len(),
@@ -82,7 +82,7 @@ fn place(
     hist.sort_by_key(|m| m.start_time);
     let aligned = align_readings(&clock_readings(frames), &hist, history.anchor.map(|a| a.0))?;
     let offset = aligned.offset;
-    report(
+    notify(
         cfg,
         Progress::Aligned {
             offset,
@@ -91,7 +91,7 @@ fn place(
     );
 
     // Starts come in VOD order, so matches keep the order of their first start.
-    let mut groups: Vec<(u64, Vec<&Start>)> = Vec::new();
+    let mut groups: Vec<(u64, Vec<&GameStart>)> = Vec::new();
     let mut segments = Vec::new();
     for (start, m) in &aligned.starts {
         match m {
@@ -141,8 +141,8 @@ fn place(
 fn place_matches(
     cfg: &Config,
     api: &Client,
-    hist: &[HistMatch],
-    groups: &[(u64, Vec<&Start>)],
+    hist: &[HistoryMatch],
+    groups: &[(u64, Vec<&GameStart>)],
     vod_duration: f64,
 ) -> (Vec<MatchReport>, Vec<Highlight>) {
     let mut fetcher = Fetcher::new(api, cfg.account);
@@ -177,12 +177,12 @@ fn place_matches(
                         .push(Degraded::PauseMismatch { gaps_s, pauses_s });
                 }
                 if let Some(v) = m.vod_start {
-                    let events = timeline(&t.events, v, &t.pauses, t.duration_s);
+                    let events = vod_events(&t.events, v, &t.pauses, t.duration_s);
                     highlights.extend(windows(*id, &events, vod_duration));
                 }
             }
         }
-        report(cfg, Progress::Match(m.clone()));
+        notify(cfg, Progress::Match(m.clone()));
         matches.push(m);
     }
     (matches, highlights)
@@ -190,8 +190,8 @@ fn place_matches(
 
 /// History matches the VOD should show, inside its aligned span, that got no game start.
 fn unseen(
-    hist: &[HistMatch],
-    groups: &[(u64, Vec<&Start>)],
+    hist: &[HistoryMatch],
+    groups: &[(u64, Vec<&GameStart>)],
     offset: i64,
     vod_duration: f64,
 ) -> Vec<UnseenMatch> {
@@ -207,7 +207,7 @@ fn unseen(
         .collect()
 }
 
-fn segment(start: &Start) -> ClockSegment {
+fn segment(start: &GameStart) -> ClockSegment {
     let times = start.readings.iter().map(|r| r.vod_time);
     ClockSegment {
         vod_start: times.clone().fold(f64::INFINITY, f64::min),
@@ -230,8 +230,8 @@ fn read_vod(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> Result<Vec<F
         cfg.profile.t,
         reader,
         usize::from(cfg.parallel),
-        &SystemClock::new(),
-        &|done, total| report(cfg, Progress::Read { done, total }),
+        &RealTime::new(),
+        &|done, total| notify(cfg, Progress::Read { done, total }),
     )?;
     cache::store(&cfg.out, &key, &cfg.profile, &r)?;
     Ok(r)

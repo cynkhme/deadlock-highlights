@@ -4,20 +4,20 @@ use crate::error::{Error, Result};
 use crate::hud::clock::ClockReading;
 
 /// How far a game start may land from a history `start_time` and still hit it, s.
-const TOL_S: i64 = 60;
+const HIT_TOLERANCE_S: i64 = 60;
 /// Offsets considered around a wall-clock anchor, s.
 pub(crate) const ANCHOR_WINDOW_S: i64 = 600;
 /// Clock-0:00 values at most this far apart belong to one start, s.
 const CLUSTER_GAP_S: f64 = 5.0;
-const MIN_CLUSTER: usize = 3;
+const MIN_CLUSTER_READINGS: usize = 3;
 /// Without an anchor, the fewest starts that must hit.
-const MIN_UNANCHORED_SCORE: usize = 6;
+const MIN_UNANCHORED_HITS: usize = 6;
 /// Without an anchor, a second top-score run farther than this rejects the offset, s.
-const MAX_RUN_SPREAD_S: i64 = 2 * TOL_S;
+const MAX_RUN_SPREAD_S: i64 = 2 * HIT_TOLERANCE_S;
 
 /// A match of the account's history, as align needs it.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct HistMatch {
+pub(crate) struct HistoryMatch {
     pub match_id: u64,
     pub start_time: i64,
     pub duration_s: u32,
@@ -26,7 +26,7 @@ pub(crate) struct HistMatch {
 
 /// A game start: the VOD time of clock 0:00 and the readings that put it there.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Start {
+pub(crate) struct GameStart {
     pub vod_s: i64,
     pub readings: Vec<ClockReading>,
 }
@@ -43,17 +43,17 @@ pub(crate) struct AlignReject {
 pub(crate) struct Aligned {
     pub offset: i64,
     pub score: usize,
-    pub starts: Vec<(Start, Option<u64>)>,
+    pub starts: Vec<(GameStart, Option<u64>)>,
 }
 
-pub(crate) fn starts(readings: &[ClockReading]) -> Vec<Start> {
+pub(crate) fn starts(readings: &[ClockReading]) -> Vec<GameStart> {
     let mut zero: Vec<(f64, ClockReading)> = readings
         .iter()
         .map(|r| (r.vod_time - f64::from(r.clock_s), *r))
         .collect();
     zero.sort_by(|a, b| a.0.total_cmp(&b.0));
     zero.chunk_by(|a, b| b.0 - a.0 <= CLUSTER_GAP_S)
-        .filter(|c| c.len() >= MIN_CLUSTER)
+        .filter(|c| c.len() >= MIN_CLUSTER_READINGS)
         .map(|c| {
             let n = c.len();
             let median = if n % 2 == 1 {
@@ -61,7 +61,7 @@ pub(crate) fn starts(readings: &[ClockReading]) -> Vec<Start> {
             } else {
                 f64::midpoint(c[n / 2 - 1].0, c[n / 2].0)
             };
-            Start {
+            GameStart {
                 vod_s: median.round() as i64,
                 readings: c.iter().map(|(_, r)| *r).collect(),
             }
@@ -69,25 +69,30 @@ pub(crate) fn starts(readings: &[ClockReading]) -> Vec<Start> {
         .collect()
 }
 
-/// Starts (of `starts`) with a history `start_time` within `TOL_S` of `start + offset`.
-fn score(starts: &[i64], times: &[i64], offset: i64) -> usize {
-    starts
+/// Starts (of `start_vod_s`) with a history `start_time` within `HIT_TOLERANCE_S` of
+/// `start + offset`.
+fn hits(start_vod_s: &[i64], times: &[i64], offset: i64) -> usize {
+    start_vod_s
         .iter()
         .filter(|&&s| {
-            let i = times.partition_point(|&t| t < s + offset - TOL_S);
-            i < times.len() && times[i] <= s + offset + TOL_S
+            let i = times.partition_point(|&t| t < s + offset - HIT_TOLERANCE_S);
+            i < times.len() && times[i] <= s + offset + HIT_TOLERANCE_S
         })
         .count()
 }
 
 /// The top score and the maximal runs of consecutive offsets that reach it, within
 /// `window` when given. The score is constant between the breakpoints of the hit
-/// intervals `[t - s - TOL_S, t - s + TOL_S]`.
-fn runs(starts: &[i64], times: &[i64], window: Option<(i64, i64)>) -> (usize, Vec<(i64, i64)>) {
-    let mut bps: Vec<i64> = Vec::with_capacity(starts.len() * times.len() * 2);
-    for &s in starts {
+/// intervals `[t - s - HIT_TOLERANCE_S, t - s + HIT_TOLERANCE_S]`.
+fn runs(
+    start_vod_s: &[i64],
+    times: &[i64],
+    window: Option<(i64, i64)>,
+) -> (usize, Vec<(i64, i64)>) {
+    let mut bps: Vec<i64> = Vec::with_capacity(start_vod_s.len() * times.len() * 2);
+    for &s in start_vod_s {
         for &t in times {
-            let (mut a, mut b) = (t - s - TOL_S, t - s + TOL_S);
+            let (mut a, mut b) = (t - s - HIT_TOLERANCE_S, t - s + HIT_TOLERANCE_S);
             if let Some((lo, hi)) = window {
                 if b < lo || a > hi {
                     continue;
@@ -104,14 +109,17 @@ fn runs(starts: &[i64], times: &[i64], window: Option<(i64, i64)>) -> (usize, Ve
     }
     bps.sort_unstable();
     bps.dedup();
-    let scored: Vec<(i64, usize)> = bps.iter().map(|&p| (p, score(starts, times, p))).collect();
-    let top = scored.iter().map(|&(_, v)| v).max().unwrap_or(0);
+    let hits_at: Vec<(i64, usize)> = bps
+        .iter()
+        .map(|&p| (p, hits(start_vod_s, times, p)))
+        .collect();
+    let top = hits_at.iter().map(|&(_, v)| v).max().unwrap_or(0);
     let mut out: Vec<(i64, i64)> = Vec::new();
-    for (i, &(p, v)) in scored.iter().enumerate() {
+    for (i, &(p, v)) in hits_at.iter().enumerate() {
         if v != top {
             continue;
         }
-        let end = match (scored.get(i + 1), window) {
+        let end = match (hits_at.get(i + 1), window) {
             (Some(&(next, _)), _) => next - 1,
             (None, Some((_, hi))) => hi,
             (None, None) => p,
@@ -126,15 +134,15 @@ fn runs(starts: &[i64], times: &[i64], window: Option<(i64, i64)>) -> (usize, Ve
 
 /// The wall-clock offset (history time minus VOD time) and its score.
 pub(crate) fn align(
-    starts: &[i64],
-    history: &[HistMatch],
+    start_vod_s: &[i64],
+    history: &[HistoryMatch],
     anchor: Option<i64>,
 ) -> std::result::Result<(i64, usize), AlignReject> {
     let mut times: Vec<i64> = history.iter().map(|h| h.start_time).collect();
     times.sort_unstable();
     match anchor {
-        Some(anchor) => align_anchored(starts, &times, anchor),
-        None => align_free(starts, &times),
+        Some(anchor) => align_anchored(start_vod_s, &times, anchor),
+        None => align_unanchored(start_vod_s, &times),
     }
 }
 
@@ -143,12 +151,12 @@ fn centre((a, b): (i64, i64)) -> i64 {
 }
 
 fn align_anchored(
-    starts: &[i64],
+    start_vod_s: &[i64],
     times: &[i64],
     anchor: i64,
 ) -> std::result::Result<(i64, usize), AlignReject> {
     let window = (anchor - ANCHOR_WINDOW_S, anchor + ANCHOR_WINDOW_S);
-    let (top, found) = runs(starts, times, Some(window));
+    let (top, found) = runs(start_vod_s, times, Some(window));
     let distance = |&(a, b): &(i64, i64)| {
         if a <= anchor && anchor <= b {
             0
@@ -163,13 +171,16 @@ fn align_anchored(
         .copied()
         .map(centre);
     match offset {
-        Some(offset) if top >= 1 && 2 * top >= starts.len() => Ok((offset, top)),
+        Some(offset) if top >= 1 && 2 * top >= start_vod_s.len() => Ok((offset, top)),
         _ => Err(AlignReject { offset, score: top }),
     }
 }
 
-fn align_free(starts: &[i64], times: &[i64]) -> std::result::Result<(i64, usize), AlignReject> {
-    let (top, found) = runs(starts, times, None);
+fn align_unanchored(
+    start_vod_s: &[i64],
+    times: &[i64],
+) -> std::result::Result<(i64, usize), AlignReject> {
+    let (top, found) = runs(start_vod_s, times, None);
     let Some(&first) = found.first() else {
         return Err(AlignReject {
             offset: None,
@@ -181,7 +192,7 @@ fn align_free(starts: &[i64], times: &[i64]) -> std::result::Result<(i64, usize)
         .iter()
         .skip(1)
         .any(|r| r.0 - first.1 > MAX_RUN_SPREAD_S);
-    if top >= MIN_UNANCHORED_SCORE && !spread {
+    if top >= MIN_UNANCHORED_HITS && !spread {
         Ok((offset, top))
     } else {
         Err(AlignReject {
@@ -192,10 +203,11 @@ fn align_free(starts: &[i64], times: &[i64]) -> std::result::Result<(i64, usize)
 }
 
 /// The history match a start belongs to: the latest one starting no later than
-/// `TOL_S` after it, if that match lasts until the start. `history` is sorted by `start_time`.
-pub(crate) fn assign(start: i64, offset: i64, history: &[HistMatch]) -> Option<u64> {
+/// `HIT_TOLERANCE_S` after it, if that match lasts until the start. `history` is sorted by
+/// `start_time`.
+pub(crate) fn assign(start: i64, offset: i64, history: &[HistoryMatch]) -> Option<u64> {
     let wall = start + offset;
-    let i = history.partition_point(|h| h.start_time <= wall + TOL_S);
+    let i = history.partition_point(|h| h.start_time <= wall + HIT_TOLERANCE_S);
     let h = history.get(i.checked_sub(1)?)?;
     (wall - h.start_time <= i64::from(h.duration_s)).then_some(h.match_id)
 }
@@ -204,7 +216,7 @@ pub(crate) fn assign(start: i64, offset: i64, history: &[HistMatch]) -> Option<u
 /// of each start; `history` is sorted by `start_time`.
 pub(crate) fn align_readings(
     readings: &[ClockReading],
-    history: &[HistMatch],
+    history: &[HistoryMatch],
     anchor: Option<i64>,
 ) -> Result<Aligned> {
     let found = starts(readings);
@@ -248,11 +260,11 @@ mod tests {
         values.iter().map(|&v| reading(v + 600.0, 600)).collect()
     }
 
-    fn hist(times: &[i64], duration_s: u32) -> Vec<HistMatch> {
+    fn hist(times: &[i64], duration_s: u32) -> Vec<HistoryMatch> {
         times
             .iter()
             .enumerate()
-            .map(|(i, &t)| HistMatch {
+            .map(|(i, &t)| HistoryMatch {
                 match_id: 100 + i as u64,
                 start_time: t,
                 duration_s,
@@ -272,12 +284,12 @@ mod tests {
         Some(serde_json::from_str(&text).unwrap())
     }
 
-    fn history_of(v: &Value) -> Vec<HistMatch> {
-        let mut h: Vec<HistMatch> = v["history"]
+    fn history_of(v: &Value) -> Vec<HistoryMatch> {
+        let mut h: Vec<HistoryMatch> = v["history"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|e| HistMatch {
+            .map(|e| HistoryMatch {
                 match_id: e["match_id"].as_u64().unwrap(),
                 start_time: e["start_time"].as_i64().unwrap(),
                 duration_s: e["duration_s"].as_u64().unwrap() as u32,
@@ -300,7 +312,7 @@ mod tests {
         v.as_array().unwrap().iter().map(Value::as_u64).collect()
     }
 
-    fn assign_all(starts: &[i64], offset: i64, h: &[HistMatch]) -> Vec<Option<u64>> {
+    fn assign_all(starts: &[i64], offset: i64, h: &[HistoryMatch]) -> Vec<Option<u64>> {
         starts.iter().map(|&s| assign(s, offset, h)).collect()
     }
 

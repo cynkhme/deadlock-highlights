@@ -9,7 +9,7 @@ use deadlock_api::{AccountId, Error as ApiError, MatchId, MatchInfo};
 
 use crate::game::events::{MatchEvents, events};
 use crate::output::MatchStatus;
-use crate::timeline::align::HistMatch;
+use crate::timeline::align::HistoryMatch;
 use crate::timeline::place::Pause;
 
 /// A match this short is a remake: nothing happened worth a request.
@@ -64,7 +64,7 @@ impl<'a> Fetcher<'a> {
     }
 
     /// `cached` says whether the metadata is on disk, so a stopped fetcher can still read it.
-    pub(crate) fn fetch(&mut self, h: &HistMatch, cached: bool) -> Fetched {
+    pub(crate) fn fetch(&mut self, h: &HistoryMatch, cached: bool) -> Fetched {
         if h.duration_s < MIN_MATCH_S {
             return Fetched::Status(MatchStatus::Remake);
         }
@@ -150,8 +150,8 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    fn hist(id: u64, duration_s: u32, game_mode: Option<u32>) -> HistMatch {
-        HistMatch {
+    fn hist(id: u64, duration_s: u32, game_mode: Option<u32>) -> HistoryMatch {
+        HistoryMatch {
             match_id: id,
             start_time: 1_793_000_000,
             duration_s,

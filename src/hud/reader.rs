@@ -63,20 +63,20 @@ pub(crate) struct FrameReading {
 }
 
 /// Time and sleep, replaceable in tests.
-pub(crate) trait Clock: Sync {
+pub(crate) trait TimeSource: Sync {
     fn now(&self) -> Duration;
     fn sleep(&self, d: Duration);
 }
 
-pub(crate) struct SystemClock(std::time::Instant);
+pub(crate) struct RealTime(std::time::Instant);
 
-impl SystemClock {
-    pub(crate) fn new() -> SystemClock {
-        SystemClock(std::time::Instant::now())
+impl RealTime {
+    pub(crate) fn new() -> RealTime {
+        RealTime(std::time::Instant::now())
     }
 }
 
-impl Clock for SystemClock {
+impl TimeSource for RealTime {
     fn now(&self) -> Duration {
         self.0.elapsed()
     }
@@ -85,15 +85,15 @@ impl Clock for SystemClock {
     }
 }
 
-struct Shared<'a> {
+struct ReadState<'a> {
     reader: &'a dyn HudReader,
-    clock: &'a dyn Clock,
+    time: &'a dyn TimeSource,
     last_success: std::sync::Mutex<Duration>,
     any_success: std::sync::atomic::AtomicBool,
     abort: std::sync::Mutex<Option<Error>>,
 }
 
-impl Shared<'_> {
+impl ReadState<'_> {
     fn aborted(&self) -> bool {
         self.abort.lock().expect("abort lock").is_some()
     }
@@ -104,7 +104,7 @@ impl Shared<'_> {
 
     fn stalled(&self) -> bool {
         let last = *self.last_success.lock().expect("stall lock");
-        self.clock.now().saturating_sub(last) > MAX_READ_STALL
+        self.time.now().saturating_sub(last) > MAX_READ_STALL
     }
 
     /// `None` when the run was aborted.
@@ -125,16 +125,16 @@ impl Shared<'_> {
             match self.reader.read(png) {
                 Ok(raw) => {
                     self.any_success.store(true, Ordering::SeqCst);
-                    *self.last_success.lock().expect("stall lock") = self.clock.now();
+                    *self.last_success.lock().expect("stall lock") = self.time.now();
                     return Some(Outcome::Read { raw });
                 }
-                Err(ReadError::RateLimited(wait)) => self.clock.sleep(wait.unwrap_or(RETRY_PAUSE)),
+                Err(ReadError::RateLimited(wait)) => self.time.sleep(wait.unwrap_or(RETRY_PAUSE)),
                 Err(ReadError::Retryable(e)) => {
                     attempts += 1;
                     if attempts >= MAX_ATTEMPTS {
                         return Some(Outcome::Failed { error: e });
                     }
-                    self.clock.sleep(RETRY_PAUSE);
+                    self.time.sleep(RETRY_PAUSE);
                 }
                 Err(ReadError::Fatal(e)) => {
                     if !self.any_success.load(Ordering::SeqCst) {
@@ -157,14 +157,14 @@ pub(crate) fn read_frames(
     t: f32,
     reader: &dyn HudReader,
     parallel: usize,
-    clock: &dyn Clock,
+    time: &dyn TimeSource,
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<Vec<FrameReading>> {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let shared = Shared {
+    let shared = ReadState {
         reader,
-        clock,
-        last_success: std::sync::Mutex::new(clock.now()),
+        time,
+        last_success: std::sync::Mutex::new(time.now()),
         any_success: false.into(),
         abort: std::sync::Mutex::new(None),
     };
@@ -258,9 +258,9 @@ mod tests {
 
     /// Virtual time: `sleep` advances it, nothing else does unless a test says so.
     #[derive(Default)]
-    struct FakeClock(Mutex<Duration>);
+    struct FakeTime(Mutex<Duration>);
 
-    impl Clock for FakeClock {
+    impl TimeSource for FakeTime {
         fn now(&self) -> Duration {
             *self.0.lock().unwrap()
         }
@@ -277,7 +277,7 @@ mod tests {
         script: Mutex<HashMap<u64, VecDeque<Answer>>>,
         calls: Mutex<Vec<u64>>,
         jitter: bool,
-        advance: Option<(&'static FakeClock, Duration)>,
+        advance: Option<(&'static FakeTime, Duration)>,
     }
 
     impl Fake {
@@ -317,8 +317,8 @@ mod tests {
             if self.jitter {
                 std::thread::sleep(Duration::from_millis(pts / 30_000 * 7 % 5));
             }
-            if let Some((clock, d)) = self.advance {
-                clock.sleep(d);
+            if let Some((time, d)) = self.advance {
+                time.sleep(d);
             }
             let next = self
                 .script
@@ -357,9 +357,9 @@ mod tests {
         fs: &[Frame],
         r: &dyn HudReader,
         parallel: usize,
-        clock: &dyn Clock,
+        time: &dyn TimeSource,
     ) -> Result<Vec<FrameReading>> {
-        read_frames(fs, &gate, 0.40, r, parallel, clock, &|_, _| {})
+        read_frames(fs, &gate, 0.40, r, parallel, time, &|_, _| {})
     }
 
     fn retryable() -> Answer {
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn gate_fail_is_no_hud_without_call() {
         let f = Fake::default();
-        let r = read(&frames(3, &[30_000]), &f, 1, &FakeClock::default()).unwrap();
+        let r = read(&frames(3, &[30_000]), &f, 1, &FakeTime::default()).unwrap();
         assert_eq!(r[1].outcome, Outcome::NoHud);
         assert!((r[1].gate - 0.10).abs() < 1e-6);
         assert_eq!(f.calls_for(30_000), 0);
@@ -383,7 +383,7 @@ mod tests {
             (30_000, vec![Ok("{}".into())]),
             (60_000, vec![Ok("[]".into())]),
         ]);
-        let r = read(&frames(4, &[]), &f, 1, &FakeClock::default()).unwrap();
+        let r = read(&frames(4, &[]), &f, 1, &FakeTime::default()).unwrap();
         assert_eq!(
             r[0].outcome,
             Outcome::Read {
@@ -404,17 +404,17 @@ mod tests {
     #[test]
     fn retryable_then_ok() {
         let f = Fake::with(&[(0, vec![retryable(), retryable()])]);
-        let clock = FakeClock::default();
-        let r = read(&frames(1, &[]), &f, 1, &clock).unwrap();
+        let time = FakeTime::default();
+        let r = read(&frames(1, &[]), &f, 1, &time).unwrap();
         assert!(matches!(r[0].outcome, Outcome::Read { .. }));
         assert_eq!(f.calls_for(0), 3);
-        assert_eq!(clock.now(), Duration::from_secs(2));
+        assert_eq!(time.now(), Duration::from_secs(2));
     }
 
     #[test]
     fn three_retryables_is_failed() {
         let f = Fake::with(&[(0, vec![retryable(), retryable(), retryable()])]);
-        let r = read(&frames(20, &[]), &f, 1, &FakeClock::default()).unwrap();
+        let r = read(&frames(20, &[]), &f, 1, &FakeTime::default()).unwrap();
         assert_eq!(
             r[0].outcome,
             Outcome::Failed {
@@ -428,16 +428,16 @@ mod tests {
     fn rate_limit_waits_without_spending_an_attempt() {
         let rl = || Err(ReadError::RateLimited(Some(Duration::from_secs(7))));
         let f = Fake::with(&[(0, vec![rl(), rl(), rl(), retryable(), retryable()])]);
-        let clock = FakeClock::default();
-        let r = read(&frames(1, &[]), &f, 1, &clock).unwrap();
+        let time = FakeTime::default();
+        let r = read(&frames(1, &[]), &f, 1, &time).unwrap();
         assert!(matches!(r[0].outcome, Outcome::Read { .. }));
-        assert_eq!(clock.now(), Duration::from_secs(21 + 2));
+        assert_eq!(time.now(), Duration::from_secs(21 + 2));
     }
 
     #[test]
     fn first_request_fatal_aborts() {
         let f = Fake::with(&[(0, vec![Err(ReadError::Fatal("400: unknown field".into()))])]);
-        let e = read(&frames(3, &[]), &f, 1, &FakeClock::default()).unwrap_err();
+        let e = read(&frames(3, &[]), &f, 1, &FakeTime::default()).unwrap_err();
         assert!(
             matches!(&e, Error::Reader(m) if m.contains("400: unknown field")),
             "{e}"
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn later_fatal_is_failed() {
         let f = Fake::with(&[(30_000, vec![Err(ReadError::Fatal("413: too large".into()))])]);
-        let r = read(&frames(20, &[]), &f, 1, &FakeClock::default()).unwrap();
+        let r = read(&frames(20, &[]), &f, 1, &FakeTime::default()).unwrap();
         assert_eq!(
             r[1].outcome,
             Outcome::Failed {
@@ -461,9 +461,9 @@ mod tests {
     fn failed_share_over_10_percent_errors() {
         let three = || vec![retryable(), retryable(), retryable()];
         let one = Fake::with(&[(0, three())]);
-        assert!(read(&frames(10, &[]), &one, 1, &FakeClock::default()).is_ok());
+        assert!(read(&frames(10, &[]), &one, 1, &FakeTime::default()).is_ok());
         let two = Fake::with(&[(0, three()), (30_000, three())]);
-        let e = read(&frames(10, &[]), &two, 1, &FakeClock::default()).unwrap_err();
+        let e = read(&frames(10, &[]), &two, 1, &FakeTime::default()).unwrap_err();
         assert!(
             matches!(&e, Error::Reader(m) if m == "2 of 10 reads failed"),
             "{e}"
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn stall_after_300s_errors() {
-        static CLOCK: std::sync::LazyLock<FakeClock> = std::sync::LazyLock::new(FakeClock::default);
+        static CLOCK: std::sync::LazyLock<FakeTime> = std::sync::LazyLock::new(FakeTime::default);
         let f = Fake {
             advance: Some((&CLOCK, Duration::from_secs(120))),
             ..Fake::with(&[
@@ -497,8 +497,8 @@ mod tests {
             ])
         };
         let fs = frames(40, &[60_000, 600_000]);
-        let one = read(&fs, &make(), 1, &FakeClock::default()).unwrap();
-        let four = read(&fs, &make(), 4, &FakeClock::default()).unwrap();
+        let one = read(&fs, &make(), 1, &FakeTime::default()).unwrap();
+        let four = read(&fs, &make(), 4, &FakeTime::default()).unwrap();
         assert_eq!(one, four);
         assert!(one.windows(2).all(|w| w[0].pts_ms < w[1].pts_ms));
     }
@@ -513,7 +513,7 @@ mod tests {
             0.40,
             &f,
             2,
-            &FakeClock::default(),
+            &FakeTime::default(),
             &|d, total| {
                 assert_eq!(total, 5);
                 done.fetch_max(d, Ordering::SeqCst);

@@ -153,7 +153,7 @@ fn hms(s: f64) -> String {
     format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
 }
 
-fn summary(h: &Highlight) -> String {
+fn event_counts(h: &Highlight) -> String {
     format!(
         "{}K {}A {}D, {} deaths, {} obj",
         h.my_kills, h.my_assists, h.my_deaths, h.deaths, h.objectives
@@ -184,7 +184,7 @@ fn print_table(o: &Output, min_density: f64, file: &Path) {
             h.density,
             h.score,
             h.match_id,
-            summary(h)
+            event_counts(h)
         );
     }
     let _ = writeln!(

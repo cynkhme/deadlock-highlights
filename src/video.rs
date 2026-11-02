@@ -27,7 +27,7 @@ pub(crate) struct Frame {
     pub png: Vec<u8>,
 }
 
-fn run(cmd: &mut Command, what: &str) -> Result<Vec<u8>> {
+fn command_output(cmd: &mut Command, what: &str) -> Result<Vec<u8>> {
     let program = cmd.get_program().to_string_lossy().into_owned();
     let out = cmd.output().map_err(|e| {
         Error::Ffmpeg(if e.kind() == std::io::ErrorKind::NotFound {
@@ -50,7 +50,7 @@ fn run(cmd: &mut Command, what: &str) -> Result<Vec<u8>> {
 pub(crate) fn probe(vod: &Path) -> Result<Probe> {
     let what = vod.display().to_string();
     let meta = std::fs::metadata(vod).map_err(|e| Error::Ffmpeg(format!("{what}: {e}")))?;
-    let out = run(
+    let out = command_output(
         Command::new("ffprobe")
             .args([
                 "-v",
@@ -143,7 +143,7 @@ pub(crate) fn keyframes(
         "-frame_pts",
         "1",
     ];
-    run(
+    command_output(
         Command::new("ffmpeg")
             .args(["-v", "error", "-nostdin", "-skip_frame", "nokey", "-i"])
             .arg(vod)
@@ -213,7 +213,7 @@ pub(crate) fn cut_clip(vod: &Path, start: f64, end: f64, dest: &Path) -> Result<
     let ext = dest.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
     let stem = dest.file_stem().and_then(|s| s.to_str()).unwrap_or("clip");
     let part = dir.join(format!("{stem}.part.{ext}"));
-    let result = run(
+    let result = command_output(
         Command::new("ffmpeg")
             .args([
                 "-v",
