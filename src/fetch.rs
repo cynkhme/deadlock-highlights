@@ -13,9 +13,9 @@ use crate::output::MatchStatus;
 use crate::place::Pause;
 
 /// A match this short is a remake: nothing happened worth a request (§4 status table).
-const MIN_MATCH_S: u32 = 180;
+pub(crate) const MIN_MATCH_S: u32 = 180;
 /// The standard mode; others, such as Street Brawl, restart the clock every round.
-const STANDARD_MODE: u32 = 1;
+pub(crate) const STANDARD_MODE: u32 = 1;
 /// A rate limit longer than the crate's retry policy waits stops further requests: every
 /// one would be refused until it ends.
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(60);

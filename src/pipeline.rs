@@ -9,7 +9,7 @@ use crate::cache_key;
 use crate::clock::ClockReading;
 use crate::config::{Config, Progress};
 use crate::error::{Error, Result};
-use crate::fetch::{Fetched, Fetcher, is_cached};
+use crate::fetch::{Fetched, Fetcher, MIN_MATCH_S, STANDARD_MODE, is_cached};
 use crate::gate::Gate;
 use crate::history::load_history;
 use crate::output::{
@@ -27,8 +27,6 @@ use crate::video::{GRID_S, Probe, cut_clip, keyframes};
 /// The note of every clock segment (§4 Align, no match).
 const SEGMENT_NOTE: &str =
     "no history match: free map, hideout, or a match missing from the history";
-/// History matches shorter than this are remakes, and not expected on the VOD.
-const MIN_MATCH_S: u32 = 180;
 
 /// Where the readings come from: the VOD's keyframes, or readings a test already has.
 pub(crate) enum FrameSource {
@@ -201,7 +199,7 @@ fn unseen(
 ) -> Vec<UnseenMatch> {
     let span_end = offset + vod_duration.ceil() as i64;
     hist.iter()
-        .filter(|h| h.duration_s >= MIN_MATCH_S && h.game_mode == Some(1))
+        .filter(|h| h.duration_s >= MIN_MATCH_S && h.game_mode == Some(STANDARD_MODE))
         .filter(|h| h.start_time <= span_end && h.start_time + i64::from(h.duration_s) >= offset)
         .filter(|h| !groups.iter().any(|(id, _)| *id == h.match_id))
         .map(|h| UnseenMatch {
