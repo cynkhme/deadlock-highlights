@@ -25,7 +25,7 @@ pub struct Config {
     pub server_api_key: Option<String>,
     pub deadlock_api_key: Option<String>,
     /// Concurrent reader requests.
-    pub parallel: usize,
+    pub parallel: u16,
     /// Windows at or above this density are cut as clips.
     pub clips_min_density: f64,
     pub clips_max: Option<usize>,
@@ -34,6 +34,12 @@ pub struct Config {
 }
 
 impl Config {
+    /// Concurrent reader requests unless set otherwise.
+    pub const DEFAULT_PARALLEL: u16 = 1;
+    /// The clip threshold unless set otherwise: the density of a window holding only one
+    /// kill by the streamer.
+    pub const DEFAULT_CLIPS_MIN_DENSITY: f64 = crate::score::LONE_OWN_KILL_DENSITY;
+
     pub fn new(
         vod: impl Into<PathBuf>,
         account: u32,
@@ -53,8 +59,8 @@ impl Config {
             model: model.into(),
             server_api_key: None,
             deadlock_api_key: None,
-            parallel: 1,
-            clips_min_density: 0.30,
+            parallel: Config::DEFAULT_PARALLEL,
+            clips_min_density: Config::DEFAULT_CLIPS_MIN_DENSITY,
             clips_max: None,
             progress: None,
             api_base_url: DEADLOCK_API_URL.into(),
@@ -220,8 +226,10 @@ mod tests {
         let c = Config::new("/v/a.mp4", 7, "http://127.0.0.1:9/v1", "m");
         assert_eq!(c.out, PathBuf::from("/v/a.mp4.dlhl"));
         assert_eq!(c.account, 7);
-        assert_eq!(c.parallel, 1);
-        assert_eq!(c.clips_min_density, 0.30);
+        assert_eq!(c.parallel, Config::DEFAULT_PARALLEL);
+        assert_eq!(c.clips_min_density, Config::DEFAULT_CLIPS_MIN_DENSITY);
+        // The README states this value as the density of a lone own kill.
+        assert_eq!(Config::DEFAULT_CLIPS_MIN_DENSITY, 0.30);
         assert_eq!(
             (c.server.as_str(), c.model.as_str()),
             ("http://127.0.0.1:9/v1", "m")

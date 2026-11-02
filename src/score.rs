@@ -11,6 +11,15 @@ const TAIL_S: f64 = 5.0;
 /// Added to a window's span in the density, so a lone event does not outrank a
 /// fight, s.
 const DENSITY_PAD_S: f64 = 10.0;
+/// Points of a window, per event of each kind; the streamer's own kill also counts as a
+/// death.
+const DEATH_POINTS: u32 = 1;
+const OWN_KILL_POINTS: u32 = 2;
+const ASSIST_POINTS: u32 = 1;
+const OBJECTIVE_POINTS: u32 = 1;
+/// The density of a window holding only one kill by the streamer.
+pub(crate) const LONE_OWN_KILL_DENSITY: f64 =
+    (DEATH_POINTS + OWN_KILL_POINTS) as f64 / DENSITY_PAD_S;
 
 /// The match's scoring events on the VOD, in VOD order: kills near the streamer and
 /// objectives, up to the end of the streamer's stream of the match.
@@ -59,7 +68,10 @@ pub(crate) fn windows(match_id: u64, events: &[Event], vod_duration: f64) -> Vec
             let my_assists = count(|e| e.my_assist);
             let objectives = count(|e| e.objective);
             let (first, last) = (g[0].vod_time, g[g.len() - 1].vod_time);
-            let score = deaths + 2 * my_kills + my_assists + objectives;
+            let score = DEATH_POINTS * deaths
+                + OWN_KILL_POINTS * my_kills
+                + ASSIST_POINTS * my_assists
+                + OBJECTIVE_POINTS * objectives;
             Highlight {
                 match_id,
                 start: (first - LEAD_IN_S).max(0.0),
@@ -152,6 +164,13 @@ mod tests {
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].score, 10);
         assert!(close(w[0].density, 10.0 / 70.0));
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp, reason = "the same arithmetic on the same values")]
+    fn lone_own_kill_has_the_named_density() {
+        let w = windows(1, &[ev(100.0, true, false)], 3600.0);
+        assert_eq!(w[0].density, LONE_OWN_KILL_DENSITY);
     }
 
     #[test]

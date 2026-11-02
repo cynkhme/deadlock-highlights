@@ -35,10 +35,10 @@ struct Args {
     #[arg(long)]
     model: String,
     /// Concurrent requests to the chat server.
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..))]
+    #[arg(long, default_value_t = Config::DEFAULT_PARALLEL, value_parser = clap::value_parser!(u16).range(1..))]
     parallel: u16,
     /// Windows at or above this density are cut as clips and listed here.
-    #[arg(long, default_value_t = 0.30)]
+    #[arg(long, default_value_t = Config::DEFAULT_CLIPS_MIN_DENSITY)]
     clips_min_density: f64,
     /// At most this many clips, best first.
     #[arg(long)]
@@ -101,7 +101,7 @@ fn cli(args: Args) -> Result<u8, Error> {
     }
     cfg.server_api_key = std::env::var("DLHL_SERVER_API_KEY").ok();
     cfg.deadlock_api_key = std::env::var("DEADLOCK_API_KEY").ok();
-    cfg.parallel = usize::from(args.parallel);
+    cfg.parallel = args.parallel;
     cfg.clips_min_density = args.clips_min_density;
     cfg.clips_max = args.clips_max;
     cfg.progress = Some(Arc::new(|p| {
@@ -281,6 +281,24 @@ mod tests {
             "DLHL_SERVER_API_KEY is only sent over https or to a loopback server, not to http://10.0.0.5:1/v1"
         );
         assert_eq!(error_code(&e), 2);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp, reason = "the same constant")]
+    fn flag_defaults_are_the_library_defaults() {
+        let a = Args::try_parse_from([
+            "dlhl",
+            "v",
+            "--account",
+            "1",
+            "--server",
+            "s",
+            "--model",
+            "m",
+        ])
+        .unwrap();
+        assert_eq!(a.parallel, Config::DEFAULT_PARALLEL);
+        assert_eq!(a.clips_min_density, Config::DEFAULT_CLIPS_MIN_DENSITY);
     }
 
     #[test]

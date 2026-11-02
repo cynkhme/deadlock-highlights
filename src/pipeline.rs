@@ -229,7 +229,7 @@ fn read_vod(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> Result<Vec<F
         &|gray| gate.score(gray),
         cfg.profile.t,
         reader,
-        cfg.parallel,
+        usize::from(cfg.parallel),
         &SystemClock::new(),
         &|done, total| report(cfg, Progress::Read { done, total }),
     )?;
