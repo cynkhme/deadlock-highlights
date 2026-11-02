@@ -1,6 +1,7 @@
 //! Highlight windows and clips for Deadlock VODs, from the game clock on screen and
 //! deadlock-api.com match data.
 
+mod align;
 mod clock;
 mod config;
 mod error;
