@@ -18,6 +18,15 @@ pub(crate) fn path(slot: u32, xs: &[u32], health: &[u32], combat: &[u32]) -> Val
     p
 }
 
+/// `player` with `stats` samples of (time, net worth).
+pub(crate) fn with_stats(mut player: Value, samples: &[(Option<u32>, Option<u64>)]) -> Value {
+    player["stats"] = samples
+        .iter()
+        .map(|&(t, nw)| json!({"time_stamp_s": t, "net_worth": nw}))
+        .collect();
+    player
+}
+
 /// A player; `deaths` are (game time, killer slot, death x).
 pub(crate) fn player(
     account: u32,

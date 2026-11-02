@@ -103,6 +103,12 @@ impl<'a> Track<'a> {
             == Some(&1)
     }
 
+    /// Health in percent one sample before `game_time`.
+    pub(crate) fn health_before(&self, game_time: f64) -> Option<u32> {
+        let i = usize::try_from(self.index(game_time) - 1).ok()?;
+        self.path.health.get(i).copied()
+    }
+
     /// Alive and within the assist radius of `pos` at some second of the assist window.
     pub(crate) fn near(&self, game_time: f64, pos: &Pos) -> bool {
         let i = self.index(game_time);

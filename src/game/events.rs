@@ -23,6 +23,10 @@ pub(crate) struct Kill {
     /// Counts for the score: the streamer's own kill or death, or a death near the streamer or
     /// at a distance that cannot be judged.
     pub scored: bool,
+    /// On the streamer's own kill: their health one sample before it, in percent.
+    pub my_health: Option<u32>,
+    /// On the streamer's own kill: the victim's net worth over the streamer's.
+    pub net_worth_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +89,14 @@ pub(crate) fn events(
                 my_assist: ally_kill && close == Some(true),
                 // Without a path or a death position proximity cannot be judged, so the death counts.
                 scored: my_kill || my_death || close != Some(false),
+                my_health: track
+                    .as_ref()
+                    .filter(|_| my_kill)
+                    .and_then(|tr| tr.health_before(game_time)),
+                net_worth_ratio: my_kill
+                    .then(|| Some(net_worth(victim, game_time)? / net_worth(me, game_time)?))
+                    .flatten()
+                    .filter(|r| r.is_finite()),
             });
         }
     }
@@ -137,11 +149,35 @@ pub(crate) fn events(
     }
 }
 
+/// Net worth at `game_time`, linear between the stats samples, from 0 at game time 0 and held
+/// after the last sample; `None` without a sample that has both a time and a value.
+fn net_worth(p: &Player, game_time: f64) -> Option<f64> {
+    let mut points = vec![(0.0, 0.0)];
+    points.extend(
+        p.stats
+            .iter()
+            .filter_map(|s| Some((f64::from(s.time_stamp_s?), s.net_worth? as f64))),
+    );
+    if points.len() == 1 {
+        return None;
+    }
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let next = points.iter().position(|&(t, _)| t > game_time);
+    Some(match next {
+        None => points[points.len() - 1].1,
+        Some(0) => points[0].1,
+        Some(i) => {
+            let ((t0, v0), (t1, v1)) = (points[i - 1], points[i]);
+            v0 + (v1 - v0) * (game_time - t0) / (t1 - t0)
+        }
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::float_cmp, reason = "whole-second game times are exact")]
 mod tests {
     use super::*;
-    use crate::test_support::{match_info, path, player};
+    use crate::test_support::{match_info, path, player, with_stats};
     use serde_json::json;
 
     /// Me: account 1, slot 1, team 0, standing at x = 1000 the whole match. Mate: slot 2,
@@ -311,5 +347,80 @@ mod tests {
         let e = events(&m, &m.players[0], &names());
         assert_eq!(e.left_at, Some(298.0));
         assert_eq!(e.combat.last(), Some(&298.0));
+    }
+
+    #[test]
+    fn my_health_one_sample_before_the_kill() {
+        // Own kill and mate kill at game 50; index(50) = 51. Sample 51 reads 0 on a trade.
+        let mut health = vec![100; 1000];
+        health[50] = 30;
+        health[51] = 0;
+        let m = match_info(
+            999,
+            vec![
+                player(1, 1, 0, &[]),
+                player(2, 2, 0, &[]),
+                player(3, 3, 1, &[(50, Some(1), Some(1000.0))]),
+                player(4, 4, 1, &[(50, Some(2), Some(1000.0))]),
+            ],
+            Some(vec![path(1, &[1000; 1000], &health, &[])]),
+            &json!({}),
+        );
+        let e = events(&m, &m.players[0], &names());
+        let mine = e.kills.iter().find(|k| k.my_kill).unwrap();
+        let mate = e.kills.iter().find(|k| !k.my_kill).unwrap();
+        assert_eq!(mine.my_health, Some(30));
+        assert_eq!(mate.my_health, None);
+    }
+
+    /// Own kills of slot 3 at `times`, with `mine` and `victim` stats samples.
+    fn stats_match(
+        times: &[u32],
+        mine: &[(Option<u32>, Option<u64>)],
+        victim: &[(Option<u32>, Option<u64>)],
+    ) -> MatchEvents {
+        let deaths: Vec<_> = times.iter().map(|&t| (t, Some(1), Some(1000.0))).collect();
+        let m = match_info(
+            999,
+            vec![
+                with_stats(player(1, 1, 0, &[]), mine),
+                with_stats(player(3, 3, 1, &deaths), victim),
+            ],
+            Some(vec![path(1, &[1000; 1000], &[100; 1000], &[])]),
+            &json!({}),
+        );
+        events(&m, &m.players[0], &names())
+    }
+
+    fn ratios(e: &MatchEvents) -> Vec<Option<f64>> {
+        e.kills.iter().map(|k| k.net_worth_ratio).collect()
+    }
+
+    #[test]
+    fn net_worth_ratio_interpolates() {
+        let e = stats_match(
+            &[90, 180, 270, 400],
+            &[(Some(180), Some(1800)), (Some(360), Some(3600))],
+            &[(Some(180), Some(900)), (Some(360), Some(3600))],
+        );
+        assert_eq!(
+            ratios(&e),
+            vec![Some(0.5), Some(0.5), Some(2250.0 / 2700.0), Some(1.0)]
+        );
+    }
+
+    #[test]
+    fn net_worth_ratio_skips_none_samples() {
+        let mine = [(Some(180), Some(1800)), (Some(360), Some(3600))];
+        let e = stats_match(&[180], &mine, &[(Some(180), None), (Some(360), Some(3600))]);
+        assert_eq!(ratios(&e), vec![Some(1.0)]);
+        let e = stats_match(&[180], &mine, &[(Some(180), None)]);
+        assert_eq!(ratios(&e), vec![None]);
+    }
+
+    #[test]
+    fn net_worth_ratio_none_at_zero_denominator() {
+        let e = stats_match(&[0], &[(Some(180), Some(1800))], &[(Some(180), Some(1800))]);
+        assert_eq!(ratios(&e), vec![None]);
     }
 }

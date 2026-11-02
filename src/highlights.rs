@@ -39,6 +39,8 @@ pub(crate) fn vod_events(
         my_death: k.my_death,
         my_assist: k.my_assist,
         objective: false,
+        my_health: k.my_health,
+        net_worth_ratio: k.net_worth_ratio,
     });
     let objectives = ev.objectives.iter().map(|o| Event {
         vod_time: at(o.game_time),
@@ -48,6 +50,8 @@ pub(crate) fn vod_events(
         my_death: false,
         my_assist: false,
         objective: true,
+        my_health: None,
+        net_worth_ratio: None,
     });
     let mut events: Vec<Event> = kills
         .chain(objectives)
@@ -114,6 +118,8 @@ mod tests {
             my_death: false,
             my_assist,
             objective: false,
+            my_health: None,
+            net_worth_ratio: None,
         }
     }
 
@@ -126,6 +132,8 @@ mod tests {
             my_death: false,
             my_assist: false,
             scored,
+            my_health: None,
+            net_worth_ratio: None,
         }
     }
 
@@ -312,5 +320,30 @@ mod tests {
             all.iter().map(|h| h.match_id).collect::<Vec<_>>(),
             [2, 4, 1, 3]
         );
+    }
+
+    #[test]
+    fn vod_events_carry_recorded_fields() {
+        let mut k = kill(100.0, true);
+        k.my_kill = true;
+        k.my_health = Some(40);
+        k.net_worth_ratio = Some(1.2);
+        let m = MatchEvents {
+            kills: vec![k],
+            objectives: vec![Objective {
+                game_time: 200.0,
+                name: "objective 1".into(),
+                by_us: true,
+            }],
+            left_at: None,
+            has_paths: true,
+            combat: Vec::new(),
+        };
+        let t = vod_events(&m, 0.0, &[], 2000.0);
+        assert_eq!(
+            (t[0].my_health, t[0].net_worth_ratio),
+            (Some(40), Some(1.2))
+        );
+        assert_eq!((t[1].my_health, t[1].net_worth_ratio), (None, None));
     }
 }

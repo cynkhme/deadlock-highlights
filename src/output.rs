@@ -115,6 +115,11 @@ pub struct Event {
     pub my_death: bool,
     pub my_assist: bool,
     pub objective: bool,
+    /// Percent of max health, one second before the streamer's own kill; recorded, not scored.
+    pub my_health: Option<u32>,
+    /// The victim's net worth over the streamer's at the streamer's own kill, interpolated
+    /// between the metadata's stats samples; recorded, not scored.
+    pub net_worth_ratio: Option<f64>,
 }
 
 /// Events at most 12 s apart, padded, with their score and density.
