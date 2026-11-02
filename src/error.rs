@@ -25,13 +25,13 @@ pub enum Error {
     #[error("no game start: {valid_clocks} valid clocks, none 3 within 5 s")]
     NoGameStart { valid_clocks: usize },
     #[error(
-        "offset not accepted: {} scores {score} of {starts} game starts",
+        "offset not accepted: {} hits {hits} of {start_count} game starts",
         offset.map_or_else(|| "no offset".to_owned(), |o| format!("best offset {o}"))
     )]
     OffsetRejected {
         offset: Option<i64>,
-        score: usize,
-        starts: usize,
+        hits: usize,
+        start_count: usize,
         anchored: bool,
     },
     #[error("{}: {source}", path.display())]

@@ -18,8 +18,8 @@ pub use error::Error;
 pub use game::history::AnchorSource;
 pub use hud::profile::Profile;
 pub use output::{
-    Alignment, ClockSegment, Degraded, Event, Highlight, MatchReport, MatchStatus, Output,
-    Progress, UnseenMatch, VodInfo,
+    Alignment, Degraded, Event, Highlight, MatchReport, MatchStatus, Output, Progress,
+    UnmatchedStart, UnseenMatch, VodInfo,
 };
 
 /// Runs every stage on `cfg.vod` and returns what it found; writes the caches, history and

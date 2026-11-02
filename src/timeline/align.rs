@@ -31,18 +31,18 @@ pub(crate) struct GameStart {
     pub readings: Vec<ClockReading>,
 }
 
-/// An offset that was not accepted: the best one found, if any, and its score.
+/// An offset that was not accepted: the best one found, if any, and its hits.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AlignReject {
     pub offset: Option<i64>,
-    pub score: usize,
+    pub hits: usize,
 }
 
 /// The VOD's wall-clock offset and every start with the history match it belongs to.
 #[derive(Debug, Clone)]
 pub(crate) struct Aligned {
     pub offset: i64,
-    pub score: usize,
+    pub hits: usize,
     pub starts: Vec<(GameStart, Option<u64>)>,
 }
 
@@ -172,7 +172,7 @@ fn align_anchored(
         .map(centre);
     match offset {
         Some(offset) if top >= 1 && 2 * top >= start_vod_s.len() => Ok((offset, top)),
-        _ => Err(AlignReject { offset, score: top }),
+        _ => Err(AlignReject { offset, hits: top }),
     }
 }
 
@@ -184,7 +184,7 @@ fn align_unanchored(
     let Some(&first) = found.first() else {
         return Err(AlignReject {
             offset: None,
-            score: 0,
+            hits: 0,
         });
     };
     let offset = centre(first);
@@ -197,7 +197,7 @@ fn align_unanchored(
     } else {
         Err(AlignReject {
             offset: Some(offset),
-            score: top,
+            hits: top,
         })
     }
 }
@@ -226,10 +226,10 @@ pub(crate) fn align_readings(
         });
     }
     let vod_s: Vec<i64> = found.iter().map(|s| s.vod_s).collect();
-    let (offset, score) = align(&vod_s, history, anchor).map_err(|r| Error::OffsetRejected {
+    let (offset, hits) = align(&vod_s, history, anchor).map_err(|r| Error::OffsetRejected {
         offset: r.offset,
-        score: r.score,
-        starts: vod_s.len(),
+        hits: r.hits,
+        start_count: vod_s.len(),
         anchored: anchor.is_some(),
     })?;
     let starts = found
@@ -241,7 +241,7 @@ pub(crate) fn align_readings(
         .collect();
     Ok(Aligned {
         offset,
-        score,
+        hits,
         starts,
     })
 }
@@ -337,8 +337,8 @@ mod tests {
         };
         let h = history_of(&v);
         let s = ints(&v["starts"]);
-        let (off, score) = align(&s, &h, v["anchor"].as_i64()).unwrap();
-        assert_eq!(score, 3);
+        let (off, hits) = align(&s, &h, v["anchor"].as_i64()).unwrap();
+        assert_eq!(hits, 3);
         assert_eq!(assign_all(&s, off, &h), ids(&v["assign"]));
     }
 
@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn align_cut_first_match_is_segment_not_wrong() {
+    fn align_cut_first_match_is_unmatched_not_wrong() {
         let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
             return;
         };
@@ -458,14 +458,14 @@ mod tests {
     fn anchor_too_few_hits() {
         let h = hist(&[10_000], 1800);
         let r = align(&[0, 1000, 2000, 3000], &h, Some(10_000)).unwrap_err();
-        assert_eq!(r.score, 1);
+        assert_eq!(r.hits, 1);
     }
 
     #[test]
     fn no_anchor_needs_six() {
         let s = [0, 1000, 2000, 3000, 4000];
         let h = hist(&s.map(|v| v + 10_000), 600);
-        assert_eq!(align(&s, &h, None).unwrap_err().score, 5);
+        assert_eq!(align(&s, &h, None).unwrap_err().hits, 5);
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
         times.extend(s.iter().map(|v| v + 10_300));
         times.sort_unstable();
         let r = align(&s, &hist(&times, 100), None).unwrap_err();
-        assert_eq!(r.score, 6);
+        assert_eq!(r.hits, 6);
     }
 
     #[test]

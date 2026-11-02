@@ -17,8 +17,8 @@ use crate::hud::reader::{
     FrameReading, HudReader, RealTime, clock_readings, read_frames, require_clock,
 };
 use crate::output::{
-    Alignment, ClockSegment, Degraded, Highlight, MatchReport, MatchStatus, Output, Progress,
-    SCHEMA, UnseenMatch, VodInfo,
+    Alignment, Degraded, Highlight, MatchReport, MatchStatus, Output, Progress, SCHEMA,
+    UnmatchedStart, UnseenMatch, VodInfo,
 };
 use crate::timeline::align::{GameStart, HistoryMatch, align_readings};
 use crate::timeline::place::{pause_mismatch, vod_start};
@@ -85,20 +85,20 @@ fn place(
         cfg,
         Progress::Aligned {
             offset,
-            starts: aligned.starts.len(),
+            start_count: aligned.starts.len(),
         },
     );
 
     // Starts come in VOD order, so matches keep the order of their first start.
     let mut groups: Vec<(u64, Vec<&GameStart>)> = Vec::new();
-    let mut segments = Vec::new();
+    let mut unmatched_starts = Vec::new();
     for (start, m) in &aligned.starts {
         match m {
             Some(id) => match groups.iter_mut().find(|(g, _)| g == id) {
                 Some((_, starts)) => starts.push(start),
                 None => groups.push((*id, vec![start])),
             },
-            None => segments.push(segment(start)),
+            None => unmatched_starts.push(unmatched(start)),
         }
     }
 
@@ -111,7 +111,7 @@ fn place(
         .iter()
         .any(|m| matches!(m.status, MatchStatus::Unavailable { .. } | MatchStatus::NotIngested))
         // The history may not list a match that started after its newest entry yet.
-        || segments.iter().any(|s| s.vod_end + offset as f64 > newest as f64);
+        || unmatched_starts.iter().any(|s| s.last_reading + offset as f64 > newest as f64);
     let clips = clips(cfg, &highlights)?;
     Ok(Output {
         schema: SCHEMA,
@@ -124,11 +124,11 @@ fn place(
         alignment: Alignment {
             offset,
             anchor: history.anchor.map(|a| a.1),
-            score: aligned.score,
-            starts: aligned.starts.len(),
+            hits: aligned.hits,
+            start_count: aligned.starts.len(),
         },
         matches,
-        segments,
+        unmatched_starts,
         unseen,
         retryable,
         highlights,
@@ -206,11 +206,11 @@ fn unseen(
         .collect()
 }
 
-fn segment(start: &GameStart) -> ClockSegment {
+fn unmatched(start: &GameStart) -> UnmatchedStart {
     let times = start.readings.iter().map(|r| r.vod_time);
-    ClockSegment {
-        vod_start: times.clone().fold(f64::INFINITY, f64::min),
-        vod_end: times.fold(f64::NEG_INFINITY, f64::max),
+    UnmatchedStart {
+        first_reading: times.clone().fold(f64::INFINITY, f64::min),
+        last_reading: times.fold(f64::NEG_INFINITY, f64::max),
         readings: start.readings.len(),
     }
 }
@@ -424,24 +424,38 @@ mod tests {
     }
 
     #[test]
-    fn retryable_when_unavailable_or_late_segment() {
+    fn retryable_when_unavailable_or_late_unmatched_start() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         f.api.push("/v1/matches/1/metadata", 404, "{}", None);
         let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         assert_eq!(o.matches[0].status, MatchStatus::NotIngested);
         assert!(o.retryable);
 
-        // A clock segment 50 min after the newest history match started.
+        // An unmatched start 50 min after the newest history match started.
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         cache_match(&f, 1, 7, true, 300);
         let mut r = cluster(50.0, 10, 3);
         r.extend(cluster(3000.0, 10, 3));
         let o = run(&f, 3600.0, &r).unwrap();
         assert_eq!(o.matches[0].status, MatchStatus::Placed);
-        assert_eq!(o.segments.len(), 1);
-        let s = &o.segments[0];
-        assert_eq!((s.vod_start, s.vod_end, s.readings), (3010.0, 3070.0, 3));
+        assert_eq!(o.unmatched_starts.len(), 1);
+        let s = &o.unmatched_starts[0];
+        assert_eq!(
+            (s.first_reading, s.last_reading, s.readings),
+            (3010.0, 3070.0, 3)
+        );
         assert!(o.retryable);
+        let json = serde_json::to_value(&o).unwrap();
+        let start = &json["unmatched_starts"][0];
+        assert_eq!(
+            (&start["first_reading"], &start["last_reading"]),
+            (&json!(3010.0), &json!(3070.0))
+        );
+        let alignment = &json["alignment"];
+        assert_eq!(
+            (&alignment["hits"], &alignment["start_count"]),
+            (&json!(1), &json!(2))
+        );
     }
 
     #[test]
@@ -468,7 +482,7 @@ mod tests {
         let mut r = cluster(50.0, 10, 5);
         r.extend(cluster(150.0, 900, 3));
         let o = run(&f, 3600.0, &r).unwrap();
-        assert_eq!(o.alignment.starts, 2);
+        assert_eq!(o.alignment.start_count, 2);
         assert_eq!(o.matches.len(), 1);
         assert_eq!(
             f.api
@@ -636,11 +650,12 @@ mod tests {
             .collect();
         assert_eq!(placed.len(), 12, "{:?}", o.matches);
         assert_eq!(o.matches.len(), 12);
-        assert_eq!(o.segments.len(), 1, "{:?}", o.segments);
+        assert_eq!(o.unmatched_starts.len(), 1, "{:?}", o.unmatched_starts);
+        // The first reading lands within a minute of the start's clock 0:00.
         assert!(
-            (o.segments[0].vod_start - 6660.0).abs() <= 60.0,
+            (o.unmatched_starts[0].first_reading - 6660.0).abs() <= 60.0,
             "{:?}",
-            o.segments
+            o.unmatched_starts
         );
         assert!(
             !f.api

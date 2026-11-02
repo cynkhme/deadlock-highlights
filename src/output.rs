@@ -20,10 +20,10 @@ pub struct Output {
     /// Every match a game start was assigned to, in VOD order.
     pub matches: Vec<MatchReport>,
     /// Game starts with no history match.
-    pub segments: Vec<ClockSegment>,
+    pub unmatched_starts: Vec<UnmatchedStart>,
     pub unseen: Vec<UnseenMatch>,
     /// Whether a rerun may place more: some match was unavailable or not ingested yet, or
-    /// a segment ends after the newest history match started.
+    /// an unmatched start was read after the newest history match started.
     pub retryable: bool,
     pub highlights: Vec<Highlight>,
     /// Clip files of this run's settings, cut now or kept from an earlier run.
@@ -49,8 +49,8 @@ pub struct Alignment {
     pub offset: i64,
     pub anchor: Option<AnchorSource>,
     /// Game starts that fall in some history match at this offset.
-    pub score: usize,
-    pub starts: usize,
+    pub hits: usize,
+    pub start_count: usize,
 }
 
 /// One history match a game start was assigned to.
@@ -84,9 +84,11 @@ pub enum Degraded {
 /// A game start with no history match.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
-pub struct ClockSegment {
-    pub vod_start: f64,
-    pub vod_end: f64,
+pub struct UnmatchedStart {
+    /// VOD time of the start's first clock reading.
+    pub first_reading: f64,
+    /// VOD time of its last clock reading.
+    pub last_reading: f64,
     pub readings: usize,
 }
 
@@ -173,7 +175,7 @@ pub enum Progress {
     },
     Aligned {
         offset: i64,
-        starts: usize,
+        start_count: usize,
     },
     Match(MatchReport),
     Warning(String),

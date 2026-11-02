@@ -212,8 +212,11 @@ fn progress_line(p: &Progress) -> Option<String> {
             format!("read {done}/{total} frames")
         }
         Progress::Read { .. } => return None,
-        Progress::Aligned { offset, starts } => {
-            format!("aligned: VOD 0:00 at unix {offset}, {starts} game starts")
+        Progress::Aligned {
+            offset,
+            start_count,
+        } => {
+            format!("aligned: VOD 0:00 at unix {offset}, {start_count} game starts")
         }
         Progress::Match(m) => {
             let status = match &m.status {
@@ -259,8 +262,8 @@ mod tests {
         );
         let rejected = Error::OffsetRejected {
             offset: None,
-            score: 1,
-            starts: 4,
+            hits: 1,
+            start_count: 4,
             anchored: false,
         };
         assert_eq!(
