@@ -20,7 +20,7 @@ const INFO_JSON_DURATION_TOLERANCE_S: f64 = 10.0;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AnchorSource {
-    /// `--vod-start`.
+    /// [`Config::vod_start`](crate::Config::vod_start).
     Flag,
     /// yt-dlp's `<vod stem>.info.json` beside the VOD.
     InfoJson,

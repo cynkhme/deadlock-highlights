@@ -482,9 +482,7 @@ mod tests {
         let e = align_readings(&readings, &h, Some(10_000)).unwrap_err();
         let m = e.to_string();
         assert!(
-            m.contains("of 4 game starts")
-                && m.contains("--vod-start")
-                && m.contains("best offset"),
+            m.contains("of 4 game starts") && m.contains("best offset") && !m.contains("--"),
             "{m}"
         );
     }

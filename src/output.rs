@@ -1,5 +1,5 @@
-//! What a run returns. The binary writes it as `highlights.json`; field names are the
-//! Rust names, versioned by `Output::schema`.
+//! What a run returns, serialisable as JSON: field names are the Rust names, versioned by
+//! `Output::schema`.
 
 use std::path::PathBuf;
 
@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::history::AnchorSource;
 
-/// The `highlights.json` schema version.
+/// The schema version of a serialised [`Output`].
 pub(crate) const SCHEMA: u32 = 1;
 
 /// Everything a run found, best highlights first.
@@ -28,18 +28,6 @@ pub struct Output {
     pub highlights: Vec<Highlight>,
     /// Clip files of this run's settings, cut now or kept from an earlier run.
     pub clips: Vec<PathBuf>,
-}
-
-impl Output {
-    /// 0 when some match was placed, else 3 (§5 exit codes).
-    #[must_use]
-    pub fn exit_code(&self) -> u8 {
-        if self.matches.iter().any(|m| m.status == MatchStatus::Placed) {
-            0
-        } else {
-            3
-        }
-    }
 }
 
 /// The VOD a run describes.

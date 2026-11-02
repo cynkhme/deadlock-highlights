@@ -44,15 +44,49 @@ struct Args {
     clips_max: Option<usize>,
 }
 
+/// The run completed but placed no match; the reasons are in `highlights.json`.
+const EXIT_NONE_PLACED: u8 = 3;
+
 fn main() -> ExitCode {
     let args = Args::parse();
     match cli(args) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
-            eprintln!("dlhl: {e}");
-            ExitCode::from(if matches!(e, Error::Usage(_)) { 2 } else { 1 })
+            eprintln!("dlhl: {}", message(&e));
+            ExitCode::from(error_code(&e))
         }
     }
+}
+
+fn error_code(e: &Error) -> u8 {
+    if matches!(e, Error::Usage(_) | Error::InsecureKey { .. }) {
+        2
+    } else {
+        1
+    }
+}
+
+/// The flag that may get a failed run further.
+fn hint(e: &Error) -> Option<&'static str> {
+    match e {
+        Error::NoClock { .. } => Some("pass --profile for another HUD layout"),
+        Error::OffsetRejected { .. } => Some("pass --vod-start with the VOD's start time"),
+        _ => None,
+    }
+}
+
+fn message(e: &Error) -> String {
+    match (e, hint(e)) {
+        (Error::InsecureKey { server }, _) => format!(
+            "DLHL_OPENAI_API_KEY is only sent over https or to a loopback server, not to {server}"
+        ),
+        (_, Some(h)) => format!("{e}; {h}"),
+        (_, None) => e.to_string(),
+    }
+}
+
+fn vod_start(s: &str) -> Result<i64, Error> {
+    Config::parse_vod_start(s).map_err(|e| Error::Usage(format!("--vod-start {e}")))
 }
 
 fn cli(args: Args) -> Result<u8, Error> {
@@ -60,11 +94,7 @@ fn cli(args: Args) -> Result<u8, Error> {
     if let Some(out) = args.out {
         cfg.out = out;
     }
-    cfg.vod_start = args
-        .vod_start
-        .as_deref()
-        .map(Config::parse_vod_start)
-        .transpose()?;
+    cfg.vod_start = args.vod_start.as_deref().map(vod_start).transpose()?;
     if let Some(p) = &args.profile {
         cfg.profile = Profile::load(p)?;
     }
@@ -101,7 +131,11 @@ fn cli(args: Args) -> Result<u8, Error> {
             file.display()
         );
     }
-    Ok(output.exit_code())
+    let placed = output
+        .matches
+        .iter()
+        .any(|m| m.status == MatchStatus::Placed);
+    Ok(if placed { 0 } else { EXIT_NONE_PLACED })
 }
 
 fn write_atomic(file: &Path, output: &Output) -> Result<(), Error> {
@@ -213,6 +247,54 @@ fn progress_line(p: &Progress) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hints_name_the_flag_that_fixes_the_error() {
+        let no_clock = Error::NoClock {
+            band: "b".into(),
+            best_gate: 0.1,
+        };
+        assert_eq!(
+            hint(&no_clock),
+            Some("pass --profile for another HUD layout")
+        );
+        let rejected = Error::OffsetRejected {
+            offset: None,
+            score: 1,
+            starts: 4,
+            anchored: false,
+        };
+        assert_eq!(
+            hint(&rejected),
+            Some("pass --vod-start with the VOD's start time")
+        );
+        assert_eq!(hint(&Error::Usage("x".into())), None);
+        assert!(message(&no_clock).ends_with("; pass --profile for another HUD layout"));
+    }
+
+    #[test]
+    fn insecure_key_message_names_the_variable() {
+        let e = Error::InsecureKey {
+            server: "http://10.0.0.5:1/v1".into(),
+        };
+        assert_eq!(
+            message(&e),
+            "DLHL_OPENAI_API_KEY is only sent over https or to a loopback server, not to http://10.0.0.5:1/v1"
+        );
+        assert_eq!(error_code(&e), 2);
+    }
+
+    #[test]
+    fn error_codes() {
+        assert_eq!(error_code(&Error::Usage("x".into())), 2);
+        assert_eq!(error_code(&Error::Reader("x".into())), 1);
+    }
+
+    #[test]
+    fn vod_start_error_names_the_flag() {
+        let e = vod_start("2026-11-02T18:00:00").unwrap_err();
+        assert!(e.to_string().starts_with("--vod-start "), "{e}");
+    }
 
     #[test]
     fn hms_floors_and_pads() {

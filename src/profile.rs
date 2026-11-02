@@ -43,14 +43,14 @@ impl Default for Profile {
 }
 
 impl Profile {
-    /// Reads a `--profile` file.
+    /// Reads a HUD profile file.
     ///
     /// # Errors
     ///
     /// [`Error::Usage`] when the file is missing, malformed, of another version, or holds a
     /// value outside [0, 1].
     pub fn load(path: &Path) -> Result<Profile> {
-        let bad = |why: String| Error::Usage(format!("--profile {}: {why}", path.display()));
+        let bad = |why: String| Error::Usage(format!("profile {}: {why}", path.display()));
         let text = std::fs::read_to_string(path).map_err(|e| bad(e.to_string()))?;
         let p: Profile = serde_json::from_str(&text).map_err(|e| bad(e.to_string()))?;
         if p.version != 1 {

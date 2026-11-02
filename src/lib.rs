@@ -31,7 +31,7 @@ pub use output::{
 pub use profile::Profile;
 
 /// Runs every stage on `cfg.vod` and returns what it found; writes the caches, history and
-/// clips under `cfg.out`, but not `highlights.json` (the binary does).
+/// clips under `cfg.out`.
 ///
 /// # Errors
 ///

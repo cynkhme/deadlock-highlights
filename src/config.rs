@@ -55,7 +55,7 @@ impl Config {
         }
     }
 
-    /// Parses `--vod-start`: unix seconds, or RFC 3339 with an explicit offset.
+    /// Parses a VOD start time: unix seconds, or RFC 3339 with an explicit offset.
     ///
     /// # Errors
     ///
@@ -64,7 +64,7 @@ impl Config {
     pub fn parse_vod_start(s: &str) -> Result<i64, Error> {
         let usage = || {
             Error::Usage(format!(
-                "--vod-start {s:?}: needs unix seconds or RFC 3339 with an offset, e.g. 2026-11-02T18:00:00+01:00"
+                "{s:?}: needs unix seconds or RFC 3339 with an offset, e.g. 2026-11-02T18:00:00+01:00"
             ))
         };
         if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
@@ -202,7 +202,7 @@ mod tests {
         ] {
             let e = Config::parse_vod_start(bad).unwrap_err();
             assert!(
-                matches!(&e, crate::Error::Usage(m) if m.contains("RFC 3339")),
+                matches!(&e, crate::Error::Usage(m) if m.contains("RFC 3339") && !m.contains("--")),
                 "{bad:?}: {e}"
             );
         }

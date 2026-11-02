@@ -45,9 +45,9 @@ pub(crate) fn check_key_policy(server: &str, key: Option<&str>) -> Result<()> {
     if loopback {
         Ok(())
     } else {
-        Err(Error::Usage(format!(
-            "DLHL_OPENAI_API_KEY is only sent over https or to a loopback server, not to {server}"
-        )))
+        Err(Error::InsecureKey {
+            server: server.to_owned(),
+        })
     }
 }
 
@@ -424,7 +424,7 @@ mod tests {
         ] {
             let e = check_key_policy(bad, k).unwrap_err();
             assert!(
-                matches!(&e, Error::Usage(m) if m.contains("DLHL_OPENAI_API_KEY")),
+                matches!(&e, Error::InsecureKey { server } if server == bad),
                 "{bad}: {e}"
             );
         }

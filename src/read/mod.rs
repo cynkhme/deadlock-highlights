@@ -527,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn no_clock_error_names_profile() {
+    fn no_clock_error_names_band_and_best_score() {
         let r = vec![
             FrameReading {
                 pts_ms: 0,
@@ -543,7 +543,7 @@ mod tests {
         let e = require_clock(&r, &Profile::default()).unwrap_err();
         let m = e.to_string();
         assert!(
-            m.contains("--profile") && m.contains("0.45") && m.contains("center_x=0.5"),
+            !m.contains("--") && m.contains("0.45") && m.contains("center_x=0.5"),
             "{m}"
         );
         let ok = vec![FrameReading {

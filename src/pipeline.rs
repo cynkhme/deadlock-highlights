@@ -482,18 +482,11 @@ mod tests {
     }
 
     #[test]
-    fn exit_code_0_placed_3_none() {
-        let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
-        cache_match(&f, 1, 7, true, 300);
-        assert_eq!(
-            run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap().exit_code(),
-            0
-        );
+    fn match_without_the_account_is_not_yours() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         cache_match(&f, 1, 9, true, 300);
         let o = run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap();
         assert_eq!(o.matches[0].status, MatchStatus::NotYours);
-        assert_eq!(o.exit_code(), 3);
     }
 
     #[test]
