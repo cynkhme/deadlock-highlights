@@ -6,6 +6,7 @@ mod clock;
 mod config;
 mod error;
 mod events;
+mod gate;
 mod output;
 mod place;
 mod profile;
