@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use base64::Engine as _;
 
-use super::{HudReader, ReadError, ReaderIdentity};
 use crate::error::{Error, Result};
+use crate::hud::reader::{HudReader, ReadError, ReaderIdentity};
 
 /// The clock-only prompt. It holds no sample value: models echo an example on frames
 /// without a HUD.
@@ -330,7 +330,7 @@ mod tests {
         let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
         for _ in 0..2 {
             assert_eq!(
-                crate::clock::parse_answer(&r.read(b"x").unwrap()),
+                crate::hud::clock::parse_answer(&r.read(b"x").unwrap()),
                 Some(317)
             );
         }

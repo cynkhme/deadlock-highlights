@@ -1,34 +1,26 @@
 //! Highlight windows and clips for Deadlock VODs, from the game clock on screen and
 //! deadlock-api.com match data.
 
-mod align;
-mod api;
-mod clock;
 mod config;
 mod error;
-mod events;
-mod fetch;
-mod gate;
-mod history;
+mod game;
+mod highlights;
+mod hud;
 mod output;
 mod pipeline;
-mod place;
-mod profile;
-mod read;
-mod score;
 #[cfg(test)]
 mod test_support;
-mod track;
+mod timeline;
 mod video;
 
 pub use config::{Config, Progress};
 pub use error::Error;
-pub use history::AnchorSource;
+pub use game::history::AnchorSource;
+pub use hud::profile::Profile;
 pub use output::{
     Alignment, ClockSegment, Degraded, Event, Highlight, MatchReport, MatchStatus, Output,
     UnseenMatch, VodInfo,
 };
-pub use profile::Profile;
 
 /// Runs every stage on `cfg.vod` and returns what it found; writes the caches, history and
 /// clips under `cfg.out`.
@@ -39,11 +31,11 @@ pub use profile::Profile;
 /// server, the history, no clock or game start, or an offset the history does not accept.
 pub fn run(cfg: &Config) -> Result<Output, Error> {
     // The key policy is pure, so it fails before ffmpeg runs.
-    read::openai::check_key_policy(&cfg.server, cfg.server_api_key.as_deref())?;
+    hud::openai::check_key_policy(&cfg.server, cfg.server_api_key.as_deref())?;
     let probe = video::probe(&cfg.vod)?;
     // The model list is checked before the slow keyframe pass.
     let reader =
-        read::openai::OpenAiChat::new(&cfg.server, &cfg.model, cfg.server_api_key.as_deref())?;
+        hud::openai::OpenAiChat::new(&cfg.server, &cfg.model, cfg.server_api_key.as_deref())?;
     pipeline::run(cfg, &reader, &probe)
 }
 
@@ -51,15 +43,15 @@ pub fn run(cfg: &Config) -> Result<Output, Error> {
 fn cache_key(
     cfg: &Config,
     probe: &video::Probe,
-    reader: &dyn read::HudReader,
-) -> read::cache::CacheKey {
-    read::cache::CacheKey {
+    reader: &dyn hud::reader::HudReader,
+) -> hud::cache::CacheKey {
+    hud::cache::CacheKey {
         band: cfg.profile.band.clone(),
         t: cfg.profile.t,
         reader: reader.identity(),
         grid_s: video::GRID_S,
         vod_size: probe.size,
         vod_mtime: probe.mtime,
-        read_format: read::cache::READ_FORMAT,
+        read_format: hud::cache::READ_FORMAT,
     }
 }

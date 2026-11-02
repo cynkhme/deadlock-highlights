@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::error::{Error, Result};
-use crate::profile::{BAND_H, BAND_W, Profile};
+use crate::hud::profile::{BAND_H, BAND_W, Profile};
 
 /// One keyframe per this many seconds of VOD is gated and read, s.
 pub(crate) const GRID_S: u32 = 30;

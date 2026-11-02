@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::{FrameReading, ReaderIdentity, too_many_failed};
 use crate::error::{Error, Result};
-use crate::profile::{Band, Profile};
+use crate::hud::profile::{Band, Profile};
+use crate::hud::reader::{FrameReading, ReaderIdentity, too_many_failed};
 
 /// Bumped whenever request parameters or strip preparation change: old files then miss.
 pub(crate) const READ_FORMAT: u32 = 1;
@@ -90,7 +90,7 @@ pub(crate) fn store(out: &Path, k: &CacheKey, profile: &Profile, r: &[FrameReadi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::read::Outcome;
+    use crate::hud::reader::Outcome;
 
     fn key() -> CacheKey {
         CacheKey {

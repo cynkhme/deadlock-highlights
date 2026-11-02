@@ -5,24 +5,24 @@ use std::path::PathBuf;
 
 use deadlock_api::blocking::{Client, Transport};
 
-use crate::align::{HistMatch, Start, align_readings};
 use crate::cache_key;
-use crate::clock::ClockReading;
 use crate::config::{Config, Progress};
 use crate::error::{Error, Result};
-use crate::fetch::{Fetched, Fetcher, MIN_MATCH_S, STANDARD_MODE, is_cached};
-use crate::gate::Gate;
-use crate::history::{History, load_history};
+use crate::game::fetch::{Fetched, Fetcher, MIN_MATCH_S, STANDARD_MODE, is_cached};
+use crate::game::history::{History, load_history};
+use crate::highlights::{rank, timeline, windows};
+use crate::hud::cache;
+use crate::hud::clock::ClockReading;
+use crate::hud::gate::Gate;
+use crate::hud::reader::{
+    FrameReading, HudReader, SystemClock, clock_readings, read_frames, require_clock,
+};
 use crate::output::{
     Alignment, ClockSegment, Degraded, Highlight, MatchReport, MatchStatus, Output, SCHEMA,
     UnseenMatch, VodInfo,
 };
-use crate::place::{pause_mismatch, vod_start};
-use crate::read::cache;
-use crate::read::{
-    FrameReading, HudReader, SystemClock, clock_readings, read_frames, require_clock,
-};
-use crate::score::{rank, timeline, windows};
+use crate::timeline::align::{HistMatch, Start, align_readings};
+use crate::timeline::place::{pause_mismatch, vod_start};
 use crate::video::{GRID_S, Probe, cut_clip, keyframes};
 
 fn report(cfg: &Config, p: Progress) {
@@ -55,7 +55,7 @@ fn prepare(
         path: cfg.out.clone(),
         source,
     })?;
-    let api = crate::api::client(cfg, transport)?;
+    let api = crate::game::api::client(cfg, transport)?;
     let history = load_history(&api, cfg, probe, &|w| report(cfg, Progress::Warning(w)))?;
     report(
         cfg,
@@ -267,7 +267,7 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::read::Outcome;
+    use crate::hud::reader::Outcome;
     use crate::test_support::{FakeApi, match_info_json, path, player};
     use serde_json::{Value, json};
     use std::sync::Arc;

@@ -1,6 +1,6 @@
 //! Where a match starts on the VOD, from its clock readings and pauses.
 
-use crate::clock::ClockReading;
+use crate::hud::clock::ClockReading;
 
 /// Votes farther than this from the first median are misreads, s.
 const START_TOLERANCE_S: f64 = 5.0;
@@ -96,7 +96,7 @@ mod tests {
     fn r(vod_time: f64, clock: &str) -> ClockReading {
         ClockReading {
             vod_time,
-            clock_s: crate::clock::parse_clock(clock).unwrap(),
+            clock_s: crate::hud::clock::parse_clock(clock).unwrap(),
         }
     }
 

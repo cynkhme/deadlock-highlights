@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::history::AnchorSource;
+use crate::game::history::AnchorSource;
 
 /// The schema version of a serialised [`Output`].
 pub(crate) const SCHEMA: u32 = 1;

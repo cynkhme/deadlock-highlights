@@ -38,7 +38,7 @@ impl Config {
     pub const DEFAULT_PARALLEL: u16 = 1;
     /// The clip threshold unless set otherwise: the density of a window holding only one
     /// kill by the streamer.
-    pub const DEFAULT_CLIPS_MIN_DENSITY: f64 = crate::score::LONE_OWN_KILL_DENSITY;
+    pub const DEFAULT_CLIPS_MIN_DENSITY: f64 = crate::highlights::LONE_OWN_KILL_DENSITY;
 
     pub fn new(
         vod: impl Into<PathBuf>,

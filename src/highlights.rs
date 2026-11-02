@@ -1,8 +1,8 @@
 //! Events on the VOD timeline, grouped into windows and ranked by density.
 
-use crate::events::MatchEvents;
+use crate::game::events::MatchEvents;
 use crate::output::{Event, Highlight};
-use crate::place::{Pause, elapsed};
+use crate::timeline::place::{Pause, elapsed};
 
 /// Events at most this far apart form one window, s.
 const GAP_S: f64 = 12.0;
@@ -103,7 +103,7 @@ pub(crate) fn rank(all: &mut [Highlight]) {
 #[allow(clippy::float_cmp, reason = "window bounds are sums of whole seconds")]
 mod tests {
     use super::*;
-    use crate::events::{Kill, Objective};
+    use crate::game::events::{Kill, Objective};
 
     fn ev(vod_time: f64, my_kill: bool, my_assist: bool) -> Event {
         Event {

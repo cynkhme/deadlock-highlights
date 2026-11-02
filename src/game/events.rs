@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use deadlock_api::{AccountId, MatchInfo, Player};
 
-use crate::track::Track;
+use crate::game::track::Track;
 
 /// A player death, from the streamer's point of view.
 #[derive(Debug, Clone, PartialEq)]

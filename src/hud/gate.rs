@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::profile::{BAND_H, BAND_W};
+use crate::hud::profile::{BAND_H, BAND_W};
 
 /// Pixels at or above this are glyph strokes; the templates were cut at the same value.
 const THR: u8 = 150;
@@ -39,7 +39,7 @@ struct Bank {
 
 impl Gate {
     pub(crate) fn new() -> Gate {
-        let bank: Bank = serde_json::from_str(include_str!("../templates/clock_glyphs.json"))
+        let bank: Bank = serde_json::from_str(include_str!("../../templates/clock_glyphs.json"))
             .expect("the shipped glyph bank parses");
         let scaled = SCALES
             .iter()
@@ -172,7 +172,7 @@ fn chain_in_window(row: &[f64], k: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile::{BAND_H, BAND_W};
+    use crate::hud::profile::{BAND_H, BAND_W};
 
     /// Uniform [0, 140] with 2% of pixels at 255, from a fixed LCG.
     fn background() -> Vec<u8> {

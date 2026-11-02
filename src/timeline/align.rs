@@ -1,7 +1,7 @@
 //! Game starts from clock readings, aligned to the match history by one wall-clock offset.
 
-use crate::clock::ClockReading;
 use crate::error::{Error, Result};
+use crate::hud::clock::ClockReading;
 
 /// How far a game start may land from a history `start_time` and still hit it, s.
 const TOL_S: i64 = 60;

@@ -6,9 +6,9 @@ use deadlock_api::AccountId;
 use deadlock_api::blocking::Client;
 use serde::Serialize;
 
-use crate::align::{ANCHOR_WINDOW_S, HistMatch};
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::timeline::align::{ANCHOR_WINDOW_S, HistMatch};
 use crate::video::Probe;
 
 /// An info.json whose duration differs from the VOD's by more than this describes
@@ -149,7 +149,7 @@ mod tests {
         probe: &Probe,
         api: &std::sync::Arc<FakeApi>,
     ) -> (Result<History>, Vec<String>) {
-        let client = crate::api::client(cfg, Some(Box::new(api.clone()))).unwrap();
+        let client = crate::game::api::client(cfg, Some(Box::new(api.clone()))).unwrap();
         let warnings = RefCell::new(Vec::new());
         let r = load_history(&client, cfg, probe, &|w| warnings.borrow_mut().push(w));
         (r, warnings.into_inner())

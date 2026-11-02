@@ -7,10 +7,10 @@ use std::time::Duration;
 use deadlock_api::blocking::Client;
 use deadlock_api::{AccountId, Error as ApiError, MatchId, MatchInfo};
 
-use crate::align::HistMatch;
-use crate::events::{MatchEvents, events};
+use crate::game::events::{MatchEvents, events};
 use crate::output::MatchStatus;
-use crate::place::Pause;
+use crate::timeline::align::HistMatch;
+use crate::timeline::place::Pause;
 
 /// A match this short is a remake: nothing happened worth a request.
 pub(crate) const MIN_MATCH_S: u32 = 180;
@@ -184,7 +184,7 @@ mod tests {
         cfg.out = d.path().to_path_buf();
         cfg.api_base_url = "http://fake.test".into();
         let api = FakeApi::with(&[]);
-        let client = crate::api::client(&cfg, Some(Box::new(api.clone()))).unwrap();
+        let client = crate::game::api::client(&cfg, Some(Box::new(api.clone()))).unwrap();
         (d, api, client)
     }
 

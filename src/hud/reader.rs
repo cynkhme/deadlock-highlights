@@ -1,15 +1,12 @@
 //! The clock read on every keyframe that passes the gate.
 
-pub(crate) mod cache;
-pub(crate) mod openai;
-
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::clock::{ClockReading, parse_answer};
 use crate::error::{Error, Result};
-use crate::profile::Profile;
+use crate::hud::clock::{ClockReading, parse_answer};
+use crate::hud::profile::Profile;
 use crate::video::Frame;
 
 pub(crate) const MAX_FAILED_READ_SHARE: f64 = 0.1;
