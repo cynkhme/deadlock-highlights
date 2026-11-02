@@ -8,6 +8,12 @@ use crate::timeline::place::{Pause, elapsed};
 const GAP_S: f64 = 12.0;
 const LEAD_IN_S: f64 = 10.0;
 const TAIL_S: f64 = 5.0;
+/// The streamer's combat seconds move a window's edges (never join windows): the start to
+/// this long before the first combat second, at most `MAX_LEAD_S` before the first event; the
+/// end past the last combat second, at most `MAX_TAIL_S` after the last event, s.
+const COMBAT_LEAD_S: f64 = 3.0;
+const MAX_LEAD_S: f64 = 20.0;
+const MAX_TAIL_S: f64 = 30.0;
 /// Added to a window's span in the density, so a lone event does not outrank a
 /// fight, s.
 const DENSITY_PAD_S: f64 = 10.0;
@@ -61,8 +67,44 @@ pub(crate) fn vod_events(
     events
 }
 
-/// The windows of `events`, which are in VOD order: runs at most `GAP_S` apart.
-pub(crate) fn windows(match_id: u64, events: &[Event], vod_duration: f64) -> Vec<Highlight> {
+/// The streamer's combat seconds on the VOD, ascending, up to the end of the streamer's stream
+/// of the match.
+pub(crate) fn vod_combat(
+    ev: &MatchEvents,
+    vod_start: f64,
+    pauses: &[Pause],
+    duration_s: f64,
+) -> Vec<f64> {
+    let stream_end = ev.left_at.unwrap_or(duration_s);
+    ev.combat
+        .iter()
+        .filter(|&&t| t <= stream_end)
+        .map(|&t| vod_start + elapsed(t, pauses))
+        .filter(|&v| v >= 0.0)
+        .collect()
+}
+
+/// The match's last second on the VOD, when the streamer stayed to the end.
+pub(crate) fn match_end(
+    ev: &MatchEvents,
+    vod_start: f64,
+    pauses: &[Pause],
+    duration_s: f64,
+) -> Option<f64> {
+    ev.left_at
+        .is_none()
+        .then(|| vod_start + elapsed(duration_s, pauses))
+}
+
+/// The windows of `events`, which are in VOD order: runs at most `GAP_S` apart, their edges
+/// moved by the ascending `combat` seconds and, near it, the `match_end`.
+pub(crate) fn windows(
+    match_id: u64,
+    events: &[Event],
+    combat: &[f64],
+    match_end: Option<f64>,
+    vod_duration: f64,
+) -> Vec<Highlight> {
     events
         .chunk_by(|a, b| b.vod_time - a.vod_time <= GAP_S)
         .map(|g| {
@@ -72,16 +114,44 @@ pub(crate) fn windows(match_id: u64, events: &[Event], vod_duration: f64) -> Vec
             let my_assists = count(|e| e.my_assist);
             let objectives = count(|e| e.objective);
             let (first, last) = (g[0].vod_time, g[g.len() - 1].vod_time);
+            let mut last_c = last;
+            for &c in combat.iter().filter(|&&c| c > last) {
+                if c - last_c > GAP_S || c > last + MAX_TAIL_S {
+                    break;
+                }
+                last_c = c;
+            }
+            let mut first_c = first;
+            for &c in combat.iter().rev().filter(|&&c| c < first) {
+                if first_c - c > GAP_S || c < first - MAX_LEAD_S {
+                    break;
+                }
+                first_c = c;
+            }
+            let start = (first - LEAD_IN_S)
+                .min(first_c - COMBAT_LEAD_S)
+                .max(first - MAX_LEAD_S)
+                .max(0.0);
+            let mut end = last.max(last_c) + TAIL_S;
+            // The fight that ends the match runs to its last second (the patron's fall).
+            if let Some(m) = match_end.filter(|&m| m >= last && m - end <= GAP_S) {
+                end = end.max((m + TAIL_S).min(last + MAX_TAIL_S + TAIL_S));
+            }
+            let end = end.min(vod_duration);
             let score = DEATH_POINTS * deaths
                 + OWN_KILL_POINTS * my_kills
                 + ASSIST_POINTS * my_assists
                 + OBJECTIVE_POINTS * objectives;
             Highlight {
                 match_id,
-                start: (first - LEAD_IN_S).max(0.0),
-                end: (last + TAIL_S).min(vod_duration),
+                start,
+                end,
                 score,
                 density: f64::from(score) / (last - first + DENSITY_PAD_S),
+                combat_s: combat
+                    .iter()
+                    .filter(|&&c| (start..=end).contains(&c))
+                    .count() as u32,
                 deaths,
                 my_kills,
                 my_assists,
@@ -143,7 +213,7 @@ mod tests {
 
     #[test]
     fn lone_own_kill_density_030() {
-        let w = windows(1, &[ev(100.0, true, false)], 10_000.0);
+        let w = windows(1, &[ev(100.0, true, false)], &[], None, 10_000.0);
         assert_eq!((w[0].score, w[0].deaths, w[0].my_kills), (3, 1, 1));
         assert!(close(w[0].density, 0.30));
         assert_eq!((w[0].start, w[0].end), (90.0, 105.0));
@@ -156,7 +226,7 @@ mod tests {
             ev(102.5, true, false),
             ev(105.0, true, false),
         ];
-        let w = windows(1, &e, 10_000.0);
+        let w = windows(1, &e, &[], None, 10_000.0);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].score, 9);
         assert!(close(w[0].density, 0.60));
@@ -168,7 +238,7 @@ mod tests {
             .map(|i| ev(100.0 + f64::from(i) * 60.0 / 7.0, false, false))
             .collect();
         e[3].my_kill = true;
-        let w = windows(1, &e, 10_000.0);
+        let w = windows(1, &e, &[], None, 10_000.0);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].score, 10);
         assert!(close(w[0].density, 10.0 / 70.0));
@@ -177,7 +247,7 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp, reason = "the same arithmetic on the same values")]
     fn lone_own_kill_has_the_named_density() {
-        let w = windows(1, &[ev(100.0, true, false)], 3600.0);
+        let w = windows(1, &[ev(100.0, true, false)], &[], None, 3600.0);
         assert_eq!(w[0].density, LONE_OWN_KILL_DENSITY);
     }
 
@@ -185,7 +255,7 @@ mod tests {
     fn assist_and_objective_weights() {
         let mut o = ev(101.0, false, false);
         o.objective = true;
-        let w = windows(1, &[ev(100.0, false, true), o], 10_000.0);
+        let w = windows(1, &[ev(100.0, false, true), o], &[], None, 10_000.0);
         assert_eq!(
             (w[0].score, w[0].my_assists, w[0].objectives, w[0].deaths),
             (3, 1, 1, 1)
@@ -195,20 +265,34 @@ mod tests {
     #[test]
     fn gap_of_12_joins_13_splits() {
         assert_eq!(
-            windows(1, &[ev(100.0, false, false), ev(112.0, false, false)], 1e4).len(),
+            windows(
+                1,
+                &[ev(100.0, false, false), ev(112.0, false, false)],
+                &[],
+                None,
+                1e4
+            )
+            .len(),
             1
         );
         assert_eq!(
-            windows(1, &[ev(100.0, false, false), ev(113.0, false, false)], 1e4).len(),
+            windows(
+                1,
+                &[ev(100.0, false, false), ev(113.0, false, false)],
+                &[],
+                None,
+                1e4
+            )
+            .len(),
             2
         );
     }
 
     #[test]
     fn window_is_clamped_to_vod() {
-        let w = windows(1, &[ev(2.0, false, false)], 1000.0);
+        let w = windows(1, &[ev(2.0, false, false)], &[], None, 1000.0);
         assert_eq!(w[0].start, 0.0);
-        let w = windows(1, &[ev(999.0, false, false)], 1000.0);
+        let w = windows(1, &[ev(999.0, false, false)], &[], None, 1000.0);
         assert_eq!(w[0].end, 1000.0);
     }
 
@@ -295,7 +379,7 @@ mod tests {
 
     #[test]
     fn rank_by_density_then_score() {
-        let mut all = windows(1, &[ev(100.0, true, false)], 1e4); // 0.30, score 3
+        let mut all = windows(1, &[ev(100.0, true, false)], &[], None, 1e4); // 0.30, score 3
         all.extend(windows(
             2,
             &[
@@ -303,16 +387,22 @@ mod tests {
                 ev(502.5, true, false),
                 ev(505.0, true, false),
             ],
+            &[],
+            None,
             1e4,
         )); // 0.60
         all.extend(windows(
             3,
             &[ev(900.0, false, false), ev(910.0, true, false)],
+            &[],
+            None,
             1e4,
         )); // 4 / 20 = 0.20
         all.extend(windows(
             4,
             &[ev(1300.0, true, false), ev(1300.0, true, false)],
+            &[],
+            None,
             1e4,
         )); // 6 / 10 = 0.60, score 6
         rank(&mut all);
@@ -345,5 +435,122 @@ mod tests {
             (Some(40), Some(1.2))
         );
         assert_eq!((t[1].my_health, t[1].net_worth_ratio), (None, None));
+    }
+
+    /// Whole VOD seconds `a..=b`.
+    fn secs(a: u32, b: u32) -> Vec<f64> {
+        (a..=b).map(f64::from).collect()
+    }
+
+    /// The one window of an event at VOD 100 with `combat`.
+    fn one(combat: &[f64], match_end: Option<f64>) -> Highlight {
+        let w = windows(1, &[ev(100.0, true, false)], combat, match_end, 1e4);
+        assert_eq!(w.len(), 1);
+        w.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn combat_extends_the_tail() {
+        assert_eq!(one(&secs(101, 117), None).end, 122.0);
+    }
+
+    #[test]
+    fn combat_gap_over_12_stops_the_tail() {
+        let mut c = secs(101, 105);
+        c.push(118.0);
+        assert_eq!(one(&c, None).end, 110.0);
+    }
+
+    #[test]
+    fn max_tail_caps_the_tail() {
+        assert_eq!(one(&secs(101, 200), None).end, 135.0);
+    }
+
+    #[test]
+    fn combat_extends_the_lead() {
+        assert_eq!(one(&secs(85, 99), None).start, 82.0);
+    }
+
+    #[test]
+    fn max_lead_caps_the_lead() {
+        assert_eq!(one(&secs(50, 99), None).start, 80.0);
+    }
+
+    #[test]
+    fn no_combat_keeps_todays_edges() {
+        let w = one(&[], None);
+        assert_eq!((w.start, w.end, w.combat_s), (90.0, 105.0, 0));
+    }
+
+    #[test]
+    fn combat_never_joins_chains() {
+        let e = [ev(100.0, true, false), ev(113.0, true, false)];
+        let w = windows(1, &e, &secs(100, 113), None, 1e4);
+        assert_eq!(w.len(), 2);
+        assert_eq!((w[0].end, w[1].start), (118.0, 97.0));
+    }
+
+    #[test]
+    fn match_end_extends_to_the_patron() {
+        assert_eq!(one(&secs(101, 108), Some(119.0)).end, 124.0);
+        assert_eq!(one(&secs(101, 108), Some(150.0)).end, 113.0);
+    }
+
+    #[test]
+    fn match_end_ignored_when_streamer_left() {
+        assert_eq!(one(&secs(101, 108), None).end, 113.0);
+    }
+
+    #[test]
+    fn match_end_none_after_leave() {
+        let mut m = MatchEvents {
+            kills: vec![],
+            objectives: vec![],
+            left_at: Some(500.0),
+            has_paths: true,
+            combat: Vec::new(),
+        };
+        assert_eq!(match_end(&m, 0.0, &[], 999.0), None);
+        m.left_at = None;
+        assert_eq!(match_end(&m, 0.0, &[], 999.0), Some(999.0));
+        let pauses = [Pause {
+            game_time_s: 600.0,
+            duration_s: 30.0,
+        }];
+        assert_eq!(match_end(&m, 0.0, &pauses, 999.0), Some(1029.0));
+    }
+
+    #[test]
+    fn combat_lead_clamps_at_vod_zero() {
+        let w = windows(1, &[ev(5.0, true, false)], &secs(0, 4), None, 1e4);
+        assert_eq!(w[0].start, 0.0);
+    }
+
+    #[test]
+    fn combat_s_counts_seconds_inside() {
+        let mut c = secs(101, 117);
+        c.push(300.0);
+        assert_eq!(one(&c, None).combat_s, 17);
+    }
+
+    #[test]
+    fn combat_seconds_map_through_pauses() {
+        let m = MatchEvents {
+            kills: vec![kill(10.0, true), kill(700.0, true)],
+            objectives: vec![],
+            left_at: None,
+            has_paths: true,
+            combat: vec![10.0, 700.0],
+        };
+        let pauses = [Pause {
+            game_time_s: 600.0,
+            duration_s: 30.0,
+        }];
+        let events: Vec<f64> = vod_events(&m, -20.0, &pauses, 2000.0)
+            .iter()
+            .map(|e| e.vod_time)
+            .collect();
+        assert_eq!(vod_combat(&m, -20.0, &pauses, 2000.0), events);
+        assert_eq!(events, [710.0]);
     }
 }

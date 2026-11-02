@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::game::fetch::{Fetched, Fetcher, is_cached, skip_status};
 use crate::game::history::{History, load_history};
-use crate::highlights::{rank, vod_events, windows};
+use crate::highlights::{match_end, rank, vod_combat, vod_events, windows};
 use crate::hud::cache;
 use crate::hud::clock::ClockReading;
 use crate::hud::gate::Gate;
@@ -177,7 +177,9 @@ fn place_matches(
                 }
                 if let Some(v) = m.vod_start {
                     let events = vod_events(&t.events, v, &t.pauses, t.duration_s);
-                    highlights.extend(windows(*id, &events, vod_duration));
+                    let combat = vod_combat(&t.events, v, &t.pauses, t.duration_s);
+                    let end = match_end(&t.events, v, &t.pauses, t.duration_s);
+                    highlights.extend(windows(*id, &events, &combat, end, vod_duration));
                 }
             }
         }
@@ -351,7 +353,19 @@ mod tests {
 
     /// Me (7, slot 1) kills 8 at game time `kill_at`; a path for me unless `paths` is false.
     fn cache_match(f: &Fixture, id: u64, me: u32, paths: bool, kill_at: u32) {
-        let paths = paths.then(|| vec![path(1, &[1000; 1801], &[100; 1801], &[])]);
+        cache_match_combat(f, id, me, paths, kill_at, &[]);
+    }
+
+    /// [`cache_match`] with my path's combat types.
+    fn cache_match_combat(
+        f: &Fixture,
+        id: u64,
+        me: u32,
+        paths: bool,
+        kill_at: u32,
+        combat: &[u32],
+    ) {
+        let paths = paths.then(|| vec![path(1, &[1000; 1801], &[100; 1801], combat)]);
         let info = match_info_json(
             1800,
             vec![
@@ -378,6 +392,32 @@ mod tests {
     fn run_on(f: &Fixture, probe: &Probe, readings: &[FrameReading]) -> Result<Output> {
         let (api, history) = prepare(&f.cfg, probe, Some(Box::new(f.api.clone())))?;
         place(&f.cfg, &api, probe, history, readings)
+    }
+
+    #[test]
+    fn place_widens_windows_with_combat() {
+        // Kill at game 300 = VOD 350; combat on samples 302..=311 = game 301..=310.
+        let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
+        let mut combat = vec![0; 1801];
+        combat[302..=311].fill(1);
+        cache_match_combat(&f, 1, 7, true, 300, &combat);
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
+        let h = &o.highlights[0];
+        assert!((h.end - 365.0).abs() < 1e-9, "end {}", h.end);
+        assert_eq!(h.combat_s, 10);
+    }
+
+    #[test]
+    fn place_extends_the_window_to_the_match_end() {
+        // Kill at game 1790 = VOD 1840; the match ends at game 1800 = VOD 1850.
+        let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
+        cache_match(&f, 1, 7, true, 1790);
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
+        assert!(
+            (o.highlights[0].end - 1855.0).abs() < 1e-9,
+            "end {}",
+            o.highlights[0].end
+        );
     }
 
     #[test]

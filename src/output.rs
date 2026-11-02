@@ -132,6 +132,8 @@ pub struct Highlight {
     pub score: u32,
     /// Score per second of the events' span plus 10 s.
     pub density: f64,
+    /// Seconds of the window in which the streamer was in combat with players.
+    pub combat_s: u32,
     pub deaths: u32,
     pub my_kills: u32,
     pub my_assists: u32,
