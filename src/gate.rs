@@ -241,36 +241,4 @@ mod tests {
     fn blank_band_scores_zero() {
         assert!(Gate::new().score(&vec![0; (BAND_W * BAND_H) as usize]) <= 0.0);
     }
-
-    /// Parity with the Python reference on the local atlas30 bands; not a package test.
-    #[test]
-    #[ignore = "needs /tmp/atlas30/band and scratch/measure/gate_reference.json"]
-    fn gate_matches_reference() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let (Ok(refs), true) = (
-            std::fs::read_to_string(root.join("scratch/measure/gate_reference.json")),
-            std::path::Path::new("/tmp/atlas30/band").is_dir(),
-        ) else {
-            eprintln!("skipping: reference bands absent");
-            return;
-        };
-        let refs: std::collections::BTreeMap<String, f64> = serde_json::from_str(&refs).unwrap();
-        let g = Gate::new();
-        let t0 = std::time::Instant::now();
-        let mut worst = 0.0_f64;
-        for (name, want) in &refs {
-            let band = std::fs::read(format!("/tmp/atlas30/band/{name}")).unwrap();
-            let got = f64::from(g.score(&band));
-            worst = worst.max((got - want).abs());
-            assert!(
-                (got - want).abs() < 1e-4,
-                "{name}: rust {got} python {want}"
-            );
-        }
-        eprintln!(
-            "{} frames, max |diff| {worst:.2e}, {:.1} ms per frame",
-            refs.len(),
-            t0.elapsed().as_secs_f64() * 1000.0 / refs.len() as f64
-        );
-    }
 }
