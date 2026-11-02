@@ -7,6 +7,7 @@ mod clock;
 mod config;
 mod error;
 mod events;
+mod fetch;
 mod gate;
 mod history;
 mod output;

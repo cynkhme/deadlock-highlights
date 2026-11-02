@@ -42,6 +42,18 @@ pub(crate) fn match_info(
     paths: Option<Vec<Value>>,
     extra: &Value,
 ) -> MatchInfo {
+    serde_json::from_value(match_info_json(duration_s, players, paths, extra))
+        .expect("a valid MatchInfo")
+}
+
+/// The JSON of [`match_info`], for responses of the fake API.
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn match_info_json(
+    duration_s: u32,
+    players: Vec<Value>,
+    paths: Option<Vec<Value>>,
+    extra: &Value,
+) -> Value {
     let mut v = json!({"match_id": 42, "duration_s": duration_s, "players": players});
     if let Some(p) = paths {
         v["match_paths"] = json!({"x_resolution": 10000.0, "y_resolution": 10000.0, "paths": p});
@@ -49,13 +61,16 @@ pub(crate) fn match_info(
     for (k, x) in extra.as_object().into_iter().flatten() {
         v[k] = x.clone();
     }
-    serde_json::from_value(v).expect("a valid MatchInfo")
+    v
 }
 
 /// A scripted deadlock-api transport: responses are taken in order per path prefix, every
 /// request is logged, and an unscripted or exhausted path panics.
-/// Per path prefix, the (status, body) responses still to give.
-type Script = Vec<(String, std::collections::VecDeque<(u16, String)>)>;
+/// Per path prefix, the (status, body, Retry-After) responses still to give.
+type Script = Vec<(
+    String,
+    std::collections::VecDeque<(u16, String, Option<u64>)>,
+)>;
 
 #[derive(Default)]
 pub(crate) struct FakeApi {
@@ -68,7 +83,10 @@ impl FakeApi {
         let script = script
             .iter()
             .map(|(p, rs)| {
-                let rs = rs.iter().map(|(s, b)| (*s, (*b).to_owned())).collect();
+                let rs = rs
+                    .iter()
+                    .map(|(s, b)| (*s, (*b).to_owned(), None))
+                    .collect();
                 ((*p).to_owned(), rs)
             })
             .collect();
@@ -76,6 +94,16 @@ impl FakeApi {
             script: std::sync::Mutex::new(script),
             log: std::sync::Mutex::default(),
         })
+    }
+
+    /// Appends a response for `prefix`, after those already scripted for it.
+    pub(crate) fn push(&self, prefix: &str, status: u16, body: &str, retry_after: Option<u64>) {
+        let mut script = self.script.lock().unwrap();
+        let r = (status, body.to_owned(), retry_after);
+        match script.iter_mut().find(|(p, _)| p == prefix) {
+            Some((_, rs)) => rs.push_back(r),
+            None => script.push((prefix.to_owned(), [r].into())),
+        }
     }
 
     pub(crate) fn requests(&self) -> Vec<String> {
@@ -91,15 +119,17 @@ impl deadlock_api::blocking::Transport for FakeApi {
         let path = request.uri().path().to_owned();
         self.log.lock().unwrap().push(path.clone());
         let mut script = self.script.lock().unwrap();
-        let (status, body) = script
+        let (status, body, retry_after) = script
             .iter_mut()
             .find(|(p, _)| path.starts_with(p.as_str()))
             .and_then(|(_, rs)| rs.pop_front())
             .unwrap_or_else(|| panic!("unscripted request {path}"));
-        Ok(http::Response::builder()
+        let mut b = http::Response::builder()
             .status(status)
-            .header("content-type", "application/json")
-            .body(bytes::Bytes::from(body))
-            .unwrap())
+            .header("content-type", "application/json");
+        if let Some(s) = retry_after {
+            b = b.header("retry-after", s.to_string());
+        }
+        Ok(b.body(bytes::Bytes::from(body)).unwrap())
     }
 }

@@ -37,3 +37,25 @@ pub struct Highlight {
     pub objectives: u32,
     pub events: Vec<Event>,
 }
+
+/// What became of one history match.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum MatchStatus {
+    /// Placed on the VOD; its highlights are listed.
+    Placed,
+    /// Shorter than 180 s: no request is made.
+    Remake,
+    /// A mode other than the standard one, such as Street Brawl, whose clock restarts
+    /// every round: no request is made.
+    UnsupportedMode { game_mode: Option<u32> },
+    /// The account is not among the match's players.
+    NotYours,
+    /// deadlock-api has not ingested the match yet (404).
+    NotIngested,
+    /// Rate limited, overloaded or unreachable; a rerun may succeed.
+    Unavailable { retry_after_s: Option<u64> },
+    /// The cached metadata does not decode.
+    DecodeFailed { message: String },
+}
