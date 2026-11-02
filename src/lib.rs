@@ -14,6 +14,7 @@ mod score;
 #[cfg(test)]
 mod test_support;
 mod track;
+mod video;
 
 pub use config::{Config, Progress};
 pub use error::Error;
