@@ -2,11 +2,13 @@
 //! deadlock-api.com match data.
 
 mod align;
+mod api;
 mod clock;
 mod config;
 mod error;
 mod events;
 mod gate;
+mod history;
 mod output;
 mod place;
 mod profile;
@@ -19,4 +21,5 @@ mod video;
 
 pub use config::{Config, Progress};
 pub use error::Error;
+pub use history::AnchorSource;
 pub use profile::Profile;

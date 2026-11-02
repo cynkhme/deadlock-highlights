@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 /// How far a game start may land from a history `start_time` and still hit it, s.
 const TOL_S: i64 = 60;
 /// Offsets considered around a wall-clock anchor, s.
-const ANCHOR_WINDOW_S: i64 = 600;
+pub(crate) const ANCHOR_WINDOW_S: i64 = 600;
 /// Clock-0:00 values at most this far apart belong to one start, s.
 const CLUSTER_GAP_S: f64 = 5.0;
 const MIN_CLUSTER: usize = 3;

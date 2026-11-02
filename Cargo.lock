@@ -271,8 +271,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "bytes",
  "clap",
  "deadlock-api",
+ "http",
  "serde",
  "serde_json",
  "tempfile",

@@ -32,3 +32,7 @@ serde_json = "1"
 tempfile = "3"
 thiserror = "2"
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+
+[dev-dependencies]
+bytes = "1"
+http = "1"

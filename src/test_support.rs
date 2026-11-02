@@ -51,3 +51,55 @@ pub(crate) fn match_info(
     }
     serde_json::from_value(v).expect("a valid MatchInfo")
 }
+
+/// A scripted deadlock-api transport: responses are taken in order per path prefix, every
+/// request is logged, and an unscripted or exhausted path panics.
+/// Per path prefix, the (status, body) responses still to give.
+type Script = Vec<(String, std::collections::VecDeque<(u16, String)>)>;
+
+#[derive(Default)]
+pub(crate) struct FakeApi {
+    script: std::sync::Mutex<Script>,
+    pub log: std::sync::Mutex<Vec<String>>,
+}
+
+impl FakeApi {
+    pub(crate) fn with(script: &[(&str, &[(u16, &str)])]) -> std::sync::Arc<FakeApi> {
+        let script = script
+            .iter()
+            .map(|(p, rs)| {
+                let rs = rs.iter().map(|(s, b)| (*s, (*b).to_owned())).collect();
+                ((*p).to_owned(), rs)
+            })
+            .collect();
+        std::sync::Arc::new(FakeApi {
+            script: std::sync::Mutex::new(script),
+            log: std::sync::Mutex::default(),
+        })
+    }
+
+    pub(crate) fn requests(&self) -> Vec<String> {
+        self.log.lock().unwrap().clone()
+    }
+}
+
+impl deadlock_api::blocking::Transport for FakeApi {
+    fn send(
+        &self,
+        request: http::Request<()>,
+    ) -> Result<http::Response<bytes::Bytes>, deadlock_api::BoxError> {
+        let path = request.uri().path().to_owned();
+        self.log.lock().unwrap().push(path.clone());
+        let mut script = self.script.lock().unwrap();
+        let (status, body) = script
+            .iter_mut()
+            .find(|(p, _)| path.starts_with(p.as_str()))
+            .and_then(|(_, rs)| rs.pop_front())
+            .unwrap_or_else(|| panic!("unscripted request {path}"));
+        Ok(http::Response::builder()
+            .status(status)
+            .header("content-type", "application/json")
+            .body(bytes::Bytes::from(body))
+            .unwrap())
+    }
+}
