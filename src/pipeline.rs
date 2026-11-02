@@ -7,7 +7,7 @@ use deadlock_api::blocking::{Client, Transport};
 
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::game::fetch::{Fetched, Fetcher, MIN_MATCH_S, STANDARD_MODE, is_cached};
+use crate::game::fetch::{Fetched, Fetcher, is_cached, skip_status};
 use crate::game::history::{History, load_history};
 use crate::highlights::{rank, vod_events, windows};
 use crate::hud::cache;
@@ -196,7 +196,7 @@ fn unseen(
 ) -> Vec<UnseenMatch> {
     let span_end = offset + vod_duration.ceil() as i64;
     hist.iter()
-        .filter(|h| h.duration_s >= MIN_MATCH_S && h.game_mode == Some(STANDARD_MODE))
+        .filter(|h| skip_status(h).is_none())
         .filter(|h| h.start_time <= span_end && h.start_time + i64::from(h.duration_s) >= offset)
         .filter(|h| !groups.iter().any(|(id, _)| *id == h.match_id))
         .map(|h| UnseenMatch {

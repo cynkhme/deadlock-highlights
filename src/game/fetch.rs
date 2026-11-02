@@ -13,9 +13,9 @@ use crate::timeline::align::HistoryMatch;
 use crate::timeline::place::Pause;
 
 /// A match this short is a remake: nothing happened worth a request.
-pub(crate) const MIN_MATCH_S: u32 = 180;
+const MIN_MATCH_S: u32 = 180;
 /// The standard mode; others, such as Street Brawl, restart the clock every round.
-pub(crate) const STANDARD_MODE: u32 = 1;
+const STANDARD_MODE: u32 = 1;
 /// A rate limit longer than the crate's retry policy waits stops further requests: every
 /// one would be refused until it ends.
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(60);
@@ -54,6 +54,19 @@ struct Stopped {
     retry_after_s: Option<u64>,
 }
 
+/// Why `h` is not worth a request, or `None` for a full match of the standard mode.
+pub(crate) fn skip_status(h: &HistoryMatch) -> Option<MatchStatus> {
+    if h.duration_s < MIN_MATCH_S {
+        Some(MatchStatus::Remake)
+    } else if h.game_mode != Some(STANDARD_MODE) {
+        Some(MatchStatus::UnsupportedMode {
+            game_mode: h.game_mode,
+        })
+    } else {
+        None
+    }
+}
+
 impl<'a> Fetcher<'a> {
     pub(crate) fn new(api: &'a Client, account: u32) -> Fetcher<'a> {
         Fetcher {
@@ -65,13 +78,8 @@ impl<'a> Fetcher<'a> {
 
     /// `cached` says whether the metadata is on disk, so a stopped fetcher can still read it.
     pub(crate) fn fetch(&mut self, h: &HistoryMatch, cached: bool) -> Fetched {
-        if h.duration_s < MIN_MATCH_S {
-            return Fetched::Status(MatchStatus::Remake);
-        }
-        if h.game_mode != Some(STANDARD_MODE) {
-            return Fetched::Status(MatchStatus::UnsupportedMode {
-                game_mode: h.game_mode,
-            });
+        if let Some(status) = skip_status(h) {
+            return Fetched::Status(status);
         }
         if let (Some(Stopped { retry_after_s }), false) = (self.stopped, cached) {
             return Fetched::Status(MatchStatus::Unavailable { retry_after_s });
@@ -194,6 +202,19 @@ mod tests {
             200,
             &json!([{"account_id": 7, "personaname": "Me"}, {"account_id": 8, "personaname": "Foe"}]).to_string(),
             None,
+        );
+    }
+
+    #[test]
+    fn skip_status_passes_only_a_full_standard_match() {
+        assert_eq!(skip_status(&hist(1, 180, Some(1))), None);
+        assert_eq!(
+            skip_status(&hist(1, 179, Some(1))),
+            Some(MatchStatus::Remake)
+        );
+        assert_eq!(
+            skip_status(&hist(1, 1800, Some(4))),
+            Some(MatchStatus::UnsupportedMode { game_mode: Some(4) })
         );
     }
 
