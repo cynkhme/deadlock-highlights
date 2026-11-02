@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::output::MatchReport;
-use crate::{AnchorSource, Error, Profile};
+use crate::output::Progress;
+use crate::{Error, Profile};
 
 const DEADLOCK_API_URL: &str = "https://api.deadlock-api.com";
 
@@ -30,7 +30,7 @@ pub struct Config {
     pub clips_min_density: f64,
     pub clips_max: Option<usize>,
     pub progress: Option<Arc<dyn Fn(Progress) + Send + Sync>>,
-    pub(crate) api_base_url: String,
+    pub(crate) deadlock_api_url: String,
 }
 
 impl Config {
@@ -63,7 +63,7 @@ impl Config {
             clips_min_density: Config::DEFAULT_CLIPS_MIN_DENSITY,
             clips_max: None,
             progress: None,
-            api_base_url: DEADLOCK_API_URL.into(),
+            deadlock_api_url: DEADLOCK_API_URL.into(),
         }
     }
 
@@ -147,30 +147,6 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
-}
-
-/// Progress reported while a run goes through its stages.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum Progress {
-    Probed {
-        duration_s: f64,
-    },
-    History {
-        matches: usize,
-        anchor: Option<AnchorSource>,
-    },
-    /// Frames read so far, of `total`.
-    Read {
-        done: usize,
-        total: usize,
-    },
-    Aligned {
-        offset: i64,
-        starts: usize,
-    },
-    Match(MatchReport),
-    Warning(String),
 }
 
 #[cfg(test)]

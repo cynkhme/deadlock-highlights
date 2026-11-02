@@ -5,8 +5,7 @@ use std::path::PathBuf;
 
 use deadlock_api::blocking::{Client, Transport};
 
-use crate::cache_key;
-use crate::config::{Config, Progress};
+use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::game::fetch::{Fetched, Fetcher, MIN_MATCH_S, STANDARD_MODE, is_cached};
 use crate::game::history::{History, load_history};
@@ -18,8 +17,8 @@ use crate::hud::reader::{
     FrameReading, HudReader, RealTime, clock_readings, read_frames, require_clock,
 };
 use crate::output::{
-    Alignment, ClockSegment, Degraded, Highlight, MatchReport, MatchStatus, Output, SCHEMA,
-    UnseenMatch, VodInfo,
+    Alignment, ClockSegment, Degraded, Highlight, MatchReport, MatchStatus, Output, Progress,
+    SCHEMA, UnseenMatch, VodInfo,
 };
 use crate::timeline::align::{GameStart, HistoryMatch, align_readings};
 use crate::timeline::place::{pause_mismatch, vod_start};
@@ -216,6 +215,19 @@ fn segment(start: &GameStart) -> ClockSegment {
     }
 }
 
+/// The read-cache key of `cfg` on this VOD.
+fn cache_key(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> cache::CacheKey {
+    cache::CacheKey {
+        band: cfg.profile.band.clone(),
+        t: cfg.profile.t,
+        reader: reader.identity(),
+        grid_s: GRID_S,
+        vod_size: probe.size,
+        vod_mtime: probe.mtime,
+        read_format: cache::READ_FORMAT,
+    }
+}
+
 /// The cached readings of this VOD and settings, or a fresh read that is then cached.
 fn read_vod(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> Result<Vec<FrameReading>> {
     let key = cache_key(cfg, probe, reader);
@@ -319,7 +331,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut cfg = Config::new(d.path().join("v.mp4"), 7, "http://127.0.0.1:9/v1", "m");
         cfg.out = d.path().join("out");
-        cfg.api_base_url = "http://127.0.0.1:9".into();
+        cfg.deadlock_api_url = "http://127.0.0.1:9".into();
         cfg.vod_start = Some(A);
         cfg.clips_max = Some(0);
         let api = FakeApi::with(&[]);

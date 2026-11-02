@@ -128,7 +128,7 @@ mod tests {
     ) -> (tempfile::TempDir, Config, Probe, std::sync::Arc<FakeApi>) {
         let d = tempfile::tempdir().unwrap();
         let mut cfg = Config::new(d.path().join("stream.mp4"), 7, "http://127.0.0.1:9/v1", "m");
-        cfg.api_base_url = "http://fake.test".into();
+        cfg.deadlock_api_url = "http://fake.test".into();
         cfg.vod_start = vod_start;
         let api = FakeApi::with(&[(
             "/v1/players/7/match-history",

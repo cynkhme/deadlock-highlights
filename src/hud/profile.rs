@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
-/// The clock band at height 1080, px. Fixed: the gate's search window is in band pixels.
+/// The frame height the band is cut at, px.
+pub(crate) const FRAME_H: u32 = 1080;
+/// The clock band at height `FRAME_H`, px. Fixed: the gate's search window is in band pixels.
 pub(crate) const BAND_W: u32 = 360;
 pub(crate) const BAND_H: u32 = 64;
 

@@ -13,13 +13,13 @@ mod test_support;
 mod timeline;
 mod video;
 
-pub use config::{Config, Progress};
+pub use config::Config;
 pub use error::Error;
 pub use game::history::AnchorSource;
 pub use hud::profile::Profile;
 pub use output::{
     Alignment, ClockSegment, Degraded, Event, Highlight, MatchReport, MatchStatus, Output,
-    UnseenMatch, VodInfo,
+    Progress, UnseenMatch, VodInfo,
 };
 
 /// Runs every stage on `cfg.vod` and returns what it found; writes the caches, history and
@@ -40,21 +40,4 @@ pub fn run(cfg: &Config) -> Result<Output, Error> {
         cfg.server_api_key.as_deref(),
     )?;
     pipeline::run(cfg, &reader, &probe)
-}
-
-/// The read-cache key of `cfg` on this VOD.
-fn cache_key(
-    cfg: &Config,
-    probe: &video::Probe,
-    reader: &dyn hud::reader::HudReader,
-) -> hud::cache::CacheKey {
-    hud::cache::CacheKey {
-        band: cfg.profile.band.clone(),
-        t: cfg.profile.t,
-        reader: reader.identity(),
-        grid_s: video::GRID_S,
-        vod_size: probe.size,
-        vod_mtime: probe.mtime,
-        read_format: hud::cache::READ_FORMAT,
-    }
 }

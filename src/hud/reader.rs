@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::hud::clock::{ClockReading, parse_answer};
-use crate::hud::profile::Profile;
+use crate::hud::profile::{BAND_H, BAND_W, Profile};
 use crate::video::Frame;
 
 pub(crate) const MAX_FAILED_READ_SHARE: f64 = 0.1;
@@ -242,7 +242,7 @@ pub(crate) fn require_clock(r: &[FrameReading], profile: &Profile) -> Result<()>
         let best_gate = r.iter().map(|f| f.gate).fold(-1.0_f32, f32::max);
         return Err(Error::NoClock {
             band: format!(
-                "360x64 at center_x={}, top={}",
+                "{BAND_W}x{BAND_H} at center_x={}, top={}",
                 profile.band.center_x, profile.band.top
             ),
             best_gate,
@@ -542,7 +542,7 @@ mod tests {
         let e = require_clock(&r, &Profile::default()).unwrap_err();
         let m = e.to_string();
         assert!(
-            !m.contains("--") && m.contains("0.45") && m.contains("center_x=0.5"),
+            !m.contains("--") && m.contains("0.45") && m.contains("360x64 at center_x=0.5"),
             "{m}"
         );
         let ok = vec![FrameReading {

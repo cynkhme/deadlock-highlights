@@ -154,3 +154,27 @@ pub enum MatchStatus {
     /// The cached metadata does not decode.
     DecodeFailed { message: String },
 }
+
+/// Progress reported while a run goes through its stages.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum Progress {
+    Probed {
+        duration_s: f64,
+    },
+    History {
+        matches: usize,
+        anchor: Option<AnchorSource>,
+    },
+    /// Frames read so far, of `total`.
+    Read {
+        done: usize,
+        total: usize,
+    },
+    Aligned {
+        offset: i64,
+        starts: usize,
+    },
+    Match(MatchReport),
+    Warning(String),
+}

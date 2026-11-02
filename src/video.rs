@@ -4,12 +4,11 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::error::{Error, Result};
-use crate::hud::profile::{BAND_H, BAND_W, Profile};
+use crate::hud::profile::{BAND_H, BAND_W, FRAME_H, Profile};
 
 /// One keyframe per this many seconds of VOD is gated and read, s.
 pub(crate) const GRID_S: u32 = 30;
 /// Frames are scaled to this height before the band is cut, px.
-const NORM_H: u32 = 1080;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Probe {
@@ -98,12 +97,12 @@ pub(crate) fn probe(vod: &Path) -> Result<Probe> {
 
 /// The frame width at height 1080 (even, as the scaler needs), and the band's top-left there.
 fn crop_origin(width: u32, height: u32, profile: &Profile) -> (u32, u32, u32) {
-    let w = ((f64::from(width) * f64::from(NORM_H) / f64::from(height) / 2.0).round() as u32 * 2)
+    let w = ((f64::from(width) * f64::from(FRAME_H) / f64::from(height) / 2.0).round() as u32 * 2)
         .max(BAND_W);
     let x = ((profile.band.center_x * f64::from(w)).round() as i64 - i64::from(BAND_W / 2))
         .clamp(0, i64::from(w - BAND_W)) as u32;
-    let y = ((profile.band.top * f64::from(NORM_H)).round() as i64)
-        .clamp(0, i64::from(NORM_H - BAND_H)) as u32;
+    let y = ((profile.band.top * f64::from(FRAME_H)).round() as i64)
+        .clamp(0, i64::from(FRAME_H - BAND_H)) as u32;
     (w, x, y)
 }
 
@@ -129,7 +128,7 @@ pub(crate) fn keyframes(
     let (w, x, y) = crop_origin(probe.width, probe.height, profile);
     let graph = format!(
         "[0:v]select='isnan(prev_selected_t)+gte(t-prev_selected_t,{})',settb=1/1000,\
-         scale={w}:{NORM_H},crop={BAND_W}:{BAND_H}:{x}:{y},split=2[g][c];\
+         scale={w}:{FRAME_H},crop={BAND_W}:{BAND_H}:{x}:{y},split=2[g][c];\
          [g]format=gray[go];[c]scale={}:{}:flags=bicubic[co]",
         every_s.saturating_sub(1),
         2 * BAND_W,

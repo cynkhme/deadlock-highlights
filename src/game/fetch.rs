@@ -182,7 +182,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut cfg = Config::new(d.path().join("v.mp4"), 7, "http://127.0.0.1:9/v1", "m");
         cfg.out = d.path().to_path_buf();
-        cfg.api_base_url = "http://fake.test".into();
+        cfg.deadlock_api_url = "http://fake.test".into();
         let api = FakeApi::with(&[]);
         let client = crate::game::api::client(&cfg, Some(Box::new(api.clone()))).unwrap();
         (d, api, client)

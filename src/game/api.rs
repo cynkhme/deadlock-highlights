@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 /// `transport` replaces the network in tests.
 pub(crate) fn client(cfg: &Config, transport: Option<Box<dyn Transport>>) -> Result<Client> {
     let mut b = Client::builder()
-        .base_url(cfg.api_base_url.clone())
+        .base_url(cfg.deadlock_api_url.clone())
         .api_key(cfg.deadlock_api_key.clone())
         .cache(FileCache::new(cfg.out.clone()))
         .retry(RetryPolicy::new(3));
