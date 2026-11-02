@@ -1,5 +1,7 @@
 //! The clock read on every keyframe that passes the gate.
 
+pub(crate) mod openai;
+
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};

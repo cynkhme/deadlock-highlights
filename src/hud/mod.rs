@@ -4,6 +4,5 @@
 pub(crate) mod cache;
 pub(crate) mod clock;
 pub(crate) mod gate;
-pub(crate) mod openai;
 pub(crate) mod profile;
 pub(crate) mod reader;
