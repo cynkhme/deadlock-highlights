@@ -1,7 +1,115 @@
 //! What a run returns. The binary writes it as `highlights.json`; field names are the
 //! Rust names, versioned by `Output::schema`.
 
+use std::path::PathBuf;
+
 use serde::Serialize;
+
+use crate::history::AnchorSource;
+
+/// The `highlights.json` schema version.
+pub(crate) const SCHEMA: u32 = 1;
+
+/// Everything a run found, best highlights first.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct Output {
+    pub schema: u32,
+    pub vod: VodInfo,
+    pub alignment: Alignment,
+    /// Every match a game start was assigned to, in VOD order.
+    pub matches: Vec<MatchReport>,
+    /// Game starts with no history match.
+    pub segments: Vec<ClockSegment>,
+    pub unseen: Vec<UnseenMatch>,
+    /// Whether a rerun may place more: some match was unavailable or not ingested yet, or
+    /// a segment ends after the newest history match started.
+    pub retryable: bool,
+    pub highlights: Vec<Highlight>,
+    /// Clip files of this run's settings, cut now or kept from an earlier run.
+    pub clips: Vec<PathBuf>,
+}
+
+impl Output {
+    /// 0 when some match was placed, else 3 (§5 exit codes).
+    #[must_use]
+    pub fn exit_code(&self) -> u8 {
+        if self.matches.iter().any(|m| m.status == MatchStatus::Placed) {
+            0
+        } else {
+            3
+        }
+    }
+}
+
+/// The VOD a run describes.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct VodInfo {
+    pub path: PathBuf,
+    pub size: u64,
+    /// Unix seconds.
+    pub mtime: i64,
+    pub duration_s: f64,
+}
+
+/// The VOD's wall-clock offset, and how well the history agrees with it.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct Alignment {
+    /// Unix seconds of VOD time 0.
+    pub offset: i64,
+    pub anchor: Option<AnchorSource>,
+    /// Game starts that fall in some history match at this offset.
+    pub score: usize,
+    pub starts: usize,
+}
+
+/// One history match a game start was assigned to.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct MatchReport {
+    pub match_id: u64,
+    /// Unix seconds, from the history.
+    pub start_time: i64,
+    /// VOD time of the match's clock 0:00, when placed.
+    pub vod_start: Option<f64>,
+    pub status: MatchStatus,
+    pub degraded: Vec<Degraded>,
+}
+
+/// Why a placed match's highlights may be incomplete.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Degraded {
+    /// The metadata has no path for the streamer: no assists, no proximity, no leave.
+    NoPaths,
+    /// The gaps between the match's clock clusters disagree with its metadata pauses by
+    /// more than 5 s, so a pause may be missing from the metadata.
+    PauseMismatch {
+        gaps_s: Vec<i64>,
+        pauses_s: Vec<f64>,
+    },
+}
+
+/// A game start with no history match.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct ClockSegment {
+    pub vod_start: f64,
+    pub vod_end: f64,
+    pub readings: usize,
+    pub note: &'static str,
+}
+
+/// A history match inside the aligned VOD span that got no game start.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct UnseenMatch {
+    pub match_id: u64,
+    pub start_time: i64,
+}
 
 /// One scored moment on the VOD.
 #[derive(Debug, Clone, PartialEq, Serialize)]

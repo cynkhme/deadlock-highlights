@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::{Error, Profile};
+use crate::output::MatchReport;
+use crate::{AnchorSource, Error, Profile};
 
 const DEADLOCK_API_URL: &str = "https://api.deadlock-api.com";
 
@@ -139,7 +140,26 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 /// Progress reported while a run goes through its stages.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub enum Progress {}
+pub enum Progress {
+    Probed {
+        duration_s: f64,
+    },
+    History {
+        matches: usize,
+        anchor: Option<AnchorSource>,
+    },
+    /// Frames read so far, of `total`.
+    Read {
+        done: usize,
+        total: usize,
+    },
+    Aligned {
+        offset: i64,
+        starts: usize,
+    },
+    Match(MatchReport),
+    Warning(String),
+}
 
 #[cfg(test)]
 mod tests {
