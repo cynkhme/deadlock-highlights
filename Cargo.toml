@@ -23,7 +23,6 @@ cast_possible_wrap = "allow"
 unreadable_literal = "allow"
 
 [dependencies]
-anyhow = "1"
 base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 deadlock-api = { version = "0.1", features = ["fs-cache"] }

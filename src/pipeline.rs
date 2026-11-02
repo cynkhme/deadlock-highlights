@@ -33,6 +33,10 @@ const MIN_MATCH_S: u32 = 180;
 /// Where the readings come from: the VOD's keyframes, or readings a test already has.
 pub(crate) enum FrameSource {
     Vod(Probe),
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "tests supply readings in place of a VOD")
+    )]
     Readings(Probe, Vec<FrameReading>),
 }
 

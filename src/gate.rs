@@ -26,6 +26,8 @@ struct Scaled {
 }
 
 pub(crate) struct Gate {
+    /// The templates as shipped, for tests that check them.
+    #[cfg(test)]
     glyphs: BTreeMap<char, Vec<Vec<f32>>>,
     /// Per scale, every class.
     scaled: Vec<Vec<Scaled>>,
@@ -45,6 +47,7 @@ impl Gate {
             .map(|&s| bank.classes.values().map(|t| scale(t, s)).collect())
             .collect();
         Gate {
+            #[cfg(test)]
             glyphs: bank.classes,
             scaled,
         }
