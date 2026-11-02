@@ -44,7 +44,7 @@ pub fn run(cfg: &Config) -> Result<Output, Error> {
     // The model list is checked before the slow keyframe pass.
     let reader =
         read::openai::OpenAiChat::new(&cfg.server, &cfg.model, cfg.openai_api_key.as_deref())?;
-    pipeline::run_with(cfg, &reader, pipeline::FrameSource::Vod(probe), None)
+    pipeline::run(cfg, &reader, &probe)
 }
 
 /// The read-cache key of `cfg` on this VOD.

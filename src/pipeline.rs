@@ -1,8 +1,9 @@
-//! The stages in order, behind a seam that lets tests supply readings and the API.
+//! The stages in order: the history, the read of the VOD, then everything placed from the
+//! readings.
 
 use std::path::PathBuf;
 
-use deadlock_api::blocking::Transport;
+use deadlock_api::blocking::{Client, Transport};
 
 use crate::align::{HistMatch, Start, align_readings};
 use crate::cache_key;
@@ -11,7 +12,7 @@ use crate::config::{Config, Progress};
 use crate::error::{Error, Result};
 use crate::fetch::{Fetched, Fetcher, MIN_MATCH_S, STANDARD_MODE, is_cached};
 use crate::gate::Gate;
-use crate::history::load_history;
+use crate::history::{History, load_history};
 use crate::output::{
     Alignment, ClockSegment, Degraded, Highlight, MatchReport, MatchStatus, Output, SCHEMA,
     UnseenMatch, VodInfo,
@@ -24,32 +25,26 @@ use crate::read::{
 use crate::score::{rank, timeline, windows};
 use crate::video::{GRID_S, Probe, cut_clip, keyframes};
 
-/// Where the readings come from: the VOD's keyframes, or readings a test already has.
-pub(crate) enum FrameSource {
-    Vod(Probe),
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "tests supply readings in place of a VOD")
-    )]
-    Readings(Probe, Vec<FrameReading>),
-}
-
 fn report(cfg: &Config, p: Progress) {
     if let Some(f) = &cfg.progress {
         f(p);
     }
 }
 
-/// Every stage after the probe; `transport` replaces the network in tests.
-pub(crate) fn run_with(
+/// Every stage after the probe.
+pub(crate) fn run(cfg: &Config, reader: &dyn HudReader, probe: &Probe) -> Result<Output> {
+    let (api, history) = prepare(cfg, probe, None)?;
+    let frames = read_vod(cfg, probe, reader)?;
+    place(cfg, &api, probe, history, &frames)
+}
+
+/// The output directory, the API client and the match history; `transport` replaces the
+/// network in tests.
+fn prepare(
     cfg: &Config,
-    reader: &dyn HudReader,
-    source: FrameSource,
+    probe: &Probe,
     transport: Option<Box<dyn Transport>>,
-) -> Result<Output> {
-    let probe = match &source {
-        FrameSource::Vod(p) | FrameSource::Readings(p, _) => p.clone(),
-    };
+) -> Result<(Client, History)> {
     report(
         cfg,
         Progress::Probed {
@@ -61,7 +56,7 @@ pub(crate) fn run_with(
         source,
     })?;
     let api = crate::api::client(cfg, transport)?;
-    let history = load_history(&api, cfg, &probe, &|w| report(cfg, Progress::Warning(w)))?;
+    let history = load_history(&api, cfg, probe, &|w| report(cfg, Progress::Warning(w)))?;
     report(
         cfg,
         Progress::History {
@@ -69,16 +64,23 @@ pub(crate) fn run_with(
             anchor: history.anchor.map(|a| a.1),
         },
     );
+    Ok((api, history))
+}
 
-    let frames = match source {
-        FrameSource::Readings(_, r) => r,
-        FrameSource::Vod(p) => read_vod(cfg, &p, reader)?,
-    };
-    require_clock(&frames, &cfg.profile)?;
+/// Everything placed from the readings: alignment, each match's place and windows, and
+/// the clips.
+fn place(
+    cfg: &Config,
+    api: &Client,
+    probe: &Probe,
+    history: History,
+    frames: &[FrameReading],
+) -> Result<Output> {
+    require_clock(frames, &cfg.profile)?;
     let mut hist = history.matches;
     // Assignment takes the latest match by start time.
     hist.sort_by_key(|m| m.start_time);
-    let aligned = align_readings(&clock_readings(&frames), &hist, history.anchor.map(|a| a.0))?;
+    let aligned = align_readings(&clock_readings(frames), &hist, history.anchor.map(|a| a.0))?;
     let offset = aligned.offset;
     report(
         cfg,
@@ -101,7 +103,7 @@ pub(crate) fn run_with(
         }
     }
 
-    let (matches, mut highlights) = place_matches(cfg, &api, &hist, &groups, probe.duration_s);
+    let (matches, mut highlights) = place_matches(cfg, api, &hist, &groups, probe.duration_s);
     rank(&mut highlights);
 
     let unseen = unseen(&hist, &groups, offset, probe.duration_s);
@@ -138,7 +140,7 @@ pub(crate) fn run_with(
 /// Fetches and places each assigned match once, in VOD order; returns its reports and windows.
 fn place_matches(
     cfg: &Config,
-    api: &deadlock_api::blocking::Client,
+    api: &Client,
     hist: &[HistMatch],
     groups: &[(u64, Vec<&Start>)],
     vod_duration: f64,
@@ -265,28 +267,12 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::read::{Outcome, ReadError, ReaderIdentity};
+    use crate::read::Outcome;
     use crate::test_support::{FakeApi, match_info_json, path, player};
     use serde_json::{Value, json};
     use std::sync::Arc;
 
     const A: i64 = 1_793_000_000;
-
-    struct NoReader;
-
-    impl HudReader for NoReader {
-        fn identity(&self) -> ReaderIdentity {
-            ReaderIdentity {
-                protocol: "none",
-                server: String::new(),
-                model: String::new(),
-                prompt: "",
-            }
-        }
-        fn read(&self, _: &[u8]) -> std::result::Result<String, ReadError> {
-            panic!("the reader is not used with readings")
-        }
-    }
 
     fn reading(vod_time: f64, clock: &str) -> FrameReading {
         FrameReading {
@@ -370,20 +356,21 @@ mod tests {
         .unwrap();
     }
 
-    fn run(f: &Fixture, duration_s: f64, readings: Vec<FrameReading>) -> Result<Output> {
-        run_with(
-            &f.cfg,
-            &NoReader,
-            FrameSource::Readings(probe(duration_s), readings),
-            Some(Box::new(f.api.clone())),
-        )
+    fn run(f: &Fixture, duration_s: f64, readings: &[FrameReading]) -> Result<Output> {
+        run_on(f, &probe(duration_s), readings)
+    }
+
+    /// The run after the read, on `readings` in place of the VOD's.
+    fn run_on(f: &Fixture, probe: &Probe, readings: &[FrameReading]) -> Result<Output> {
+        let (api, history) = prepare(&f.cfg, probe, Some(Box::new(f.api.clone())))?;
+        place(&f.cfg, &api, probe, history, readings)
     }
 
     #[test]
     fn placed_with_paths_is_not_degraded() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         cache_match(&f, 1, 7, true, 300);
-        let o = run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap();
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         assert_eq!(o.matches.len(), 1);
         assert_eq!(o.matches[0].status, MatchStatus::Placed);
         assert_eq!(o.matches[0].degraded, []);
@@ -398,7 +385,7 @@ mod tests {
     fn degraded_no_paths() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         cache_match(&f, 1, 7, false, 300);
-        let o = run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap();
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         assert_eq!(o.matches[0].status, MatchStatus::Placed);
         assert_eq!(o.matches[0].degraded, [Degraded::NoPaths]);
     }
@@ -410,7 +397,7 @@ mod tests {
         cache_match(&f, 1, 7, true, 300);
         let mut r = cluster(50.0, 10, 5);
         r.extend(cluster(150.0, 400, 3));
-        let o = run(&f, 3600.0, r).unwrap();
+        let o = run(&f, 3600.0, &r).unwrap();
         assert_eq!(
             o.matches.len(),
             1,
@@ -428,7 +415,7 @@ mod tests {
     fn retryable_when_unavailable_or_late_segment() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         f.api.push("/v1/matches/1/metadata", 404, "{}", None);
-        let o = run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap();
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         assert_eq!(o.matches[0].status, MatchStatus::NotIngested);
         assert!(o.retryable);
 
@@ -437,7 +424,7 @@ mod tests {
         cache_match(&f, 1, 7, true, 300);
         let mut r = cluster(50.0, 10, 3);
         r.extend(cluster(3000.0, 10, 3));
-        let o = run(&f, 3600.0, r).unwrap();
+        let o = run(&f, 3600.0, &r).unwrap();
         assert_eq!(o.matches[0].status, MatchStatus::Placed);
         assert_eq!(o.segments.len(), 1);
         let s = &o.segments[0];
@@ -456,7 +443,7 @@ mod tests {
             hist(6, A - 1900, 1800, 1),
         ]));
         cache_match(&f, 1, 7, true, 300);
-        let o = run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap();
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         let unseen: Vec<u64> = o.unseen.iter().map(|u| u.match_id).collect();
         assert_eq!(unseen, [2]);
     }
@@ -468,7 +455,7 @@ mod tests {
         // Two starts 100 s apart, both in match 1.
         let mut r = cluster(50.0, 10, 5);
         r.extend(cluster(150.0, 900, 3));
-        let o = run(&f, 3600.0, r).unwrap();
+        let o = run(&f, 3600.0, &r).unwrap();
         assert_eq!(o.alignment.starts, 2);
         assert_eq!(o.matches.len(), 1);
         assert_eq!(
@@ -485,7 +472,7 @@ mod tests {
     fn match_without_the_account_is_not_yours() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         cache_match(&f, 1, 9, true, 300);
-        let o = run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap();
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         assert_eq!(o.matches[0].status, MatchStatus::NotYours);
     }
 
@@ -493,7 +480,7 @@ mod tests {
     fn output_serialises_field_names() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         cache_match(&f, 1, 7, false, 300);
-        let v = serde_json::to_value(run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap()).unwrap();
+        let v = serde_json::to_value(run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap()).unwrap();
         assert_eq!(v["schema"], 1);
         assert_eq!(v["alignment"]["offset"], A);
         assert_eq!(v["alignment"]["anchor"], "flag");
@@ -509,7 +496,7 @@ mod tests {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let s = seen.clone();
         f.cfg.progress = Some(Arc::new(move |p| s.lock().unwrap().push(format!("{p:?}"))));
-        run(&f, 3600.0, cluster(50.0, 10, 3)).unwrap();
+        run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         let seen = seen.lock().unwrap();
         let kinds: Vec<&str> = seen
             .iter()
@@ -561,8 +548,7 @@ mod tests {
             reading(3.0, "0:03"),
         ];
         let p = crate::video::probe(&f.cfg.vod).unwrap();
-        let src = || FrameSource::Readings(p.clone(), readings.clone());
-        let o = run_with(&f.cfg, &NoReader, src(), Some(Box::new(f.api.clone()))).unwrap();
+        let o = run_on(&f, &p, &readings).unwrap();
         assert_eq!(o.highlights.len(), 1);
         let h = &o.highlights[0];
         assert!(
@@ -579,7 +565,7 @@ mod tests {
             &json!([hist(1, A, 1800, 1)]).to_string(),
             None,
         );
-        let o = run_with(&f.cfg, &NoReader, src(), Some(Box::new(f.api.clone()))).unwrap();
+        let o = run_on(&f, &p, &readings).unwrap();
         assert_eq!(o.clips, std::slice::from_ref(&clip));
         assert_eq!(std::fs::read(&clip).unwrap(), b"kept");
     }
@@ -630,7 +616,7 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::copy(e.path().join("metadata.json"), dir.join("metadata.json")).unwrap();
         }
-        let o = run(&f, duration_s, readings).unwrap();
+        let o = run(&f, duration_s, &readings).unwrap();
         let placed: Vec<&MatchReport> = o
             .matches
             .iter()
