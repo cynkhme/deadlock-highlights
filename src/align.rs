@@ -331,8 +331,8 @@ mod tests {
     }
 
     #[test]
-    fn rs_out_full_vod() {
-        let (Some(fx), Some(exp)) = (fixture("rs-out.json"), fixture("expected.json")) else {
+    fn full_vod_aligns() {
+        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
             return;
         };
         let h = history_of(&fx);
@@ -367,8 +367,8 @@ mod tests {
     }
 
     #[test]
-    fn rs_out_windows() {
-        let (Some(fx), Some(exp)) = (fixture("rs-out.json"), fixture("expected.json")) else {
+    fn full_vod_windows() {
+        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
             return;
         };
         let h = history_of(&fx);
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn wrong_anchor_rejected() {
-        let (Some(fx), Some(exp)) = (fixture("rs-out.json"), fixture("expected.json")) else {
+        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
             return;
         };
         let h = history_of(&fx);
@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn align_cut_first_match_is_segment_not_wrong() {
-        let (Some(fx), Some(exp)) = (fixture("rs-out.json"), fixture("expected.json")) else {
+        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
             return;
         };
         let h = history_of(&fx);
