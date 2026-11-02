@@ -10,6 +10,7 @@ mod gate;
 mod output;
 mod place;
 mod profile;
+mod read;
 mod score;
 #[cfg(test)]
 mod test_support;
