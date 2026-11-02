@@ -15,13 +15,15 @@ cargo run --release -- stream.mp4 --account 167576350 \
 
 `--account` is the streamer's 32-bit Steam account id. Without `--vod-start`, the VOD's wall-clock start is read from yt-dlp's `stream.info.json` beside the VOD, if it is there and its duration is within 10 s of the VOD's. If not, it comes from the clock alone; on the measured VOD that was accepted for every span of 8 or more matches and for no span of 5 or fewer. For a shorter VOD, pass `--vod-start` with unix seconds or RFC 3339 with an offset (`2026-11-02T18:00:00+01:00`).
 
+Each read sends `temperature: 0`, `max_tokens: 64` and `reasoning_effort: "none"`. A server that refuses any of them stops the run at a test read, before the keyframe pass.
+
 `--parallel` sets how many requests go to the server at once (default 1). On Ollama 0.40.13, 4 made `qwen3-vl:4b-instruct` faster (84 s against 194 s for 120 frames) and `gemma4:e4b` slower (15 s against 8 s).
 
 Results go to `<VOD>.dlhl/`, or to `--out`:
 
 - `highlights.json`: every match with its status, the game starts that matched no match, and every window, best first. It is removed when a run starts and written when the run completes.
 - `clips/<match id>-<VOD second>.<ext>`: windows with a density of at least `--clips-min-density` (default 0.30, the density of a lone own kill), stream-copied. `--clips-max` caps the count. A clip that already exists is kept. dlhl never deletes clips.
-- `readings/`: clock readings per VOD and settings, so a rerun skips the model. It may be deleted.
+- `readings/`: clock readings per VOD and settings, so a rerun skips the model and needs no server. It may be deleted.
 - `matches/`: match metadata from deadlock-api.com, so a rerun does not request it again.
 - `history.json`: the account's match history from this run.
 

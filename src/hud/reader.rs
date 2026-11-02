@@ -39,6 +39,9 @@ pub(crate) enum ReadError {
 /// Reads the clock off one band. Values are not validated here.
 pub(crate) trait HudReader: Send + Sync {
     fn identity(&self) -> ReaderIdentity;
+    /// Checks that reads will be taken; called once before the keyframe pass, and only when
+    /// the cache lacks the readings.
+    fn preflight(&self) -> Result<()>;
     /// The raw answer text.
     fn read(&self, png: &[u8]) -> std::result::Result<String, ReadError>;
 }
@@ -312,6 +315,9 @@ mod tests {
                 model: String::new(),
                 prompt: "",
             }
+        }
+        fn preflight(&self) -> Result<()> {
+            Ok(())
         }
         fn read(&self, png: &[u8]) -> Answer {
             let pts = u64::from_le_bytes(png.try_into().unwrap());

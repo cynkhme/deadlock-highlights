@@ -234,6 +234,7 @@ fn read_vod(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> Result<Vec<F
     if let Some(r) = cache::load(&cfg.out, &key) {
         return Ok(r);
     }
+    reader.preflight()?;
     let frames = keyframes(&cfg.vod, probe, &cfg.profile, GRID_S)?;
     let gate = Gate::new();
     let r = read_frames(
@@ -279,10 +280,11 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hud::reader::Outcome;
+    use crate::hud::reader::{Outcome, ReadError, ReaderIdentity};
     use crate::test_support::{FakeApi, match_info_json, path, player};
     use serde_json::{Value, json};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     const A: i64 = 1_793_000_000;
 
@@ -472,6 +474,48 @@ mod tests {
         let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         let unseen: Vec<u64> = o.unseen.iter().map(|u| u.match_id).collect();
         assert_eq!(unseen, [2]);
+    }
+
+    /// A reader whose preflight is refused, counting its calls; it never reads.
+    #[derive(Default)]
+    struct Refused(AtomicUsize);
+
+    impl HudReader for Refused {
+        fn identity(&self) -> ReaderIdentity {
+            ReaderIdentity {
+                protocol: "fake",
+                server: "s".into(),
+                model: "m".into(),
+                prompt: "p",
+            }
+        }
+        fn preflight(&self) -> Result<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(Error::Reader("refused".into()))
+        }
+        fn read(&self, _: &[u8]) -> std::result::Result<String, ReadError> {
+            unreachable!("a refused reader is never read")
+        }
+    }
+
+    #[test]
+    fn cached_readings_need_no_server() {
+        let f = fixture(&json!([]));
+        let (probe, reader) = (probe(3600.0), Refused::default());
+        let frames = cluster(50.0, 10, 3);
+        let key = cache_key(&f.cfg, &probe, &reader);
+        cache::store(&f.cfg.out, &key, &f.cfg.profile, &frames).unwrap();
+        assert_eq!(read_vod(&f.cfg, &probe, &reader).unwrap(), frames);
+        assert_eq!(reader.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_refused_preflight_stops_before_the_keyframe_pass() {
+        let f = fixture(&json!([]));
+        let reader = Refused::default();
+        let e = read_vod(&f.cfg, &probe(3600.0), &reader).unwrap_err();
+        assert!(matches!(&e, Error::Reader(m) if m == "refused"), "{e}");
+        assert_eq!(reader.0.load(Ordering::SeqCst), 1);
     }
 
     #[test]

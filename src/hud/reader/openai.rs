@@ -21,7 +21,7 @@ pub(crate) struct OpenAiChat {
 
 /// A key goes only over https or to a loopback server, so it never crosses a network in
 /// clear text.
-pub(crate) fn check_key_policy(server: &str, key: Option<&str>) -> Result<()> {
+fn check_key_policy(server: &str, key: Option<&str>) -> Result<()> {
     if key.is_none() {
         return Ok(());
     }
@@ -51,8 +51,11 @@ pub(crate) fn check_key_policy(server: &str, key: Option<&str>) -> Result<()> {
     }
 }
 
+/// A blank clock band at the size `read` is sent, for the preflight request.
+const BLANK_BAND: &[u8] = include_bytes!("blank-band.png");
+
 impl OpenAiChat {
-    /// Checks the key policy, then that `server` serves `model`.
+    /// Checks the key policy; the server is first contacted by `preflight`.
     pub(crate) fn new(server: &str, model: &str, key: Option<&str>) -> Result<OpenAiChat> {
         check_key_policy(server, key)?;
         let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -66,7 +69,6 @@ impl OpenAiChat {
             model: model.to_owned(),
             auth: key.map(|k| format!("Bearer {k}")),
         };
-        reader.check_model()?;
         Ok(reader)
     }
 
@@ -119,6 +121,19 @@ impl HudReader for OpenAiChat {
             server: self.server.clone(),
             model: self.model.clone(),
             prompt: PROMPT,
+        }
+    }
+
+    /// The model list, then one read of a blank band, so a server that refuses the request
+    /// body fails the run before the keyframe pass.
+    fn preflight(&self) -> Result<()> {
+        self.check_model()?;
+        match self.read(BLANK_BAND) {
+            Ok(_) | Err(ReadError::RateLimited(_)) => Ok(()),
+            Err(ReadError::Retryable(e) | ReadError::Fatal(e)) => Err(Error::Reader(format!(
+                "{} refused a test read: {e}",
+                self.server
+            ))),
         }
     }
 
@@ -269,16 +284,67 @@ mod tests {
     }
 
     #[test]
-    fn models_check_lists_model() {
-        let (base, log) = server(vec![models()]);
-        OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
-        assert_eq!(log.lock().unwrap()[0].line, "GET /v1/models HTTP/1.1");
+    fn preflight_checks_the_model_then_sends_a_blank_band() {
+        let (base, log) = server(vec![models(), chat("{}")]);
+        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        assert!(log.lock().unwrap().is_empty(), "new sends nothing");
+        r.preflight().unwrap();
+        let log = log.lock().unwrap();
+        assert_eq!(log[0].line, "GET /v1/models HTTP/1.1");
+        assert_eq!(log[1].line, "POST /v1/chat/completions HTTP/1.1");
+        let b: serde_json::Value = serde_json::from_str(&log[1].body).unwrap();
+        assert_eq!(
+            b["messages"][0]["content"][0]["image_url"]["url"],
+            format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(BLANK_BAND)
+            )
+        );
+    }
+
+    #[test]
+    fn blank_band_is_a_band_strip() {
+        let dim = |i: usize| u32::from_be_bytes(BLANK_BAND[i..i + 4].try_into().unwrap());
+        assert_eq!(&BLANK_BAND[12..16], b"IHDR");
+        assert_eq!(
+            (dim(16), dim(20)),
+            (
+                2 * crate::hud::profile::BAND_W,
+                2 * crate::hud::profile::BAND_H
+            )
+        );
+    }
+
+    #[test]
+    fn preflight_names_a_refused_field() {
+        let (base, _) = server(vec![
+            models(),
+            (
+                400,
+                "",
+                r#"{"error":"unknown field reasoning_effort"}"#.into(),
+            ),
+        ]);
+        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let e = r.preflight().unwrap_err();
+        assert!(
+            matches!(&e, Error::Reader(m) if m.contains("400") && m.contains("unknown field reasoning_effort")),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn preflight_takes_a_rate_limit() {
+        let (base, _) = server(vec![models(), (429, "", String::new())]);
+        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        r.preflight().unwrap();
     }
 
     #[test]
     fn model_not_served_is_reader_error() {
         let (base, _) = server(vec![models()]);
-        let e = OpenAiChat::new(&base, "llava", None).err().unwrap();
+        let r = OpenAiChat::new(&base, "llava", None).unwrap();
+        let e = r.preflight().unwrap_err();
         assert!(
             matches!(&e, Error::Reader(m) if m.contains("llava") && m.contains("gemma4:e4b")),
             "{e}"
@@ -287,9 +353,8 @@ mod tests {
 
     #[test]
     fn unreachable_server_is_reader_error() {
-        let e = OpenAiChat::new("http://127.0.0.1:9/v1", "gemma4:e4b", None)
-            .err()
-            .unwrap();
+        let r = OpenAiChat::new("http://127.0.0.1:9/v1", "gemma4:e4b", None).unwrap();
+        let e = r.preflight().unwrap_err();
         assert!(
             matches!(&e, Error::Reader(m) if m.contains("127.0.0.1:9")),
             "{e}"
@@ -298,10 +363,10 @@ mod tests {
 
     #[test]
     fn request_body_shape() {
-        let (base, log) = server(vec![models(), chat(r#"{"clock":"5:17"}"#)]);
+        let (base, log) = server(vec![chat(r#"{"clock":"5:17"}"#)]);
         let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
         assert_eq!(r.read(b"PNGDATA").unwrap(), r#"{"clock":"5:17"}"#);
-        let req = log.lock().unwrap()[1].clone();
+        let req = log.lock().unwrap()[0].clone();
         assert_eq!(req.line, "POST /v1/chat/completions HTTP/1.1");
         assert!(req.header("authorization").is_none());
         let b: serde_json::Value = serde_json::from_str(&req.body).unwrap();
@@ -326,7 +391,7 @@ mod tests {
     #[test]
     fn fenced_and_unfenced_answers() {
         let fenced = "```json\n{\"clock\": \"5:17\"}\n```";
-        let (base, _) = server(vec![models(), chat(fenced), chat(r#"{"clock":"5:17"}"#)]);
+        let (base, _) = server(vec![chat(fenced), chat(r#"{"clock":"5:17"}"#)]);
         let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
         for _ in 0..2 {
             assert_eq!(
@@ -339,7 +404,6 @@ mod tests {
     #[test]
     fn openai_prose_answer_is_kept_raw() {
         let (base, _) = server(vec![
-            models(),
             chat("I see 5:17"),
             (200, "", "not json".into()),
             (
@@ -357,7 +421,6 @@ mod tests {
     #[test]
     fn statuses_map_to_read_errors() {
         let (base, _) = server(vec![
-            models(),
             (
                 400,
                 "",
@@ -393,9 +456,11 @@ mod tests {
 
     #[test]
     fn key_sent_only_as_bearer() {
-        let (base, log) = server(vec![models(), chat("{}")]);
+        let (base, log) = server(vec![models(), chat("{}"), chat("{}")]);
         let r = OpenAiChat::new(&base, "gemma4:e4b", Some("sk-test")).unwrap();
+        r.preflight().unwrap();
         r.read(b"x").unwrap();
+        assert_eq!(log.lock().unwrap().len(), 3);
         for req in log.lock().unwrap().iter() {
             assert_eq!(req.header("authorization"), Some("Bearer sk-test"));
             assert!(!req.body.contains("sk-test"));
