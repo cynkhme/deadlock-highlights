@@ -1,5 +1,6 @@
 //! Stage 4: the clock read on every keyframe that passes the gate (spec section 3).
 
+pub(crate) mod cache;
 pub(crate) mod openai;
 
 use std::time::Duration;
@@ -206,11 +207,7 @@ pub(crate) fn read_frames(
     }
     let mut r = results.into_inner().expect("results lock");
     r.sort_by_key(|f| f.pts_ms);
-    let failed = r
-        .iter()
-        .filter(|f| matches!(f.outcome, Outcome::Failed { .. }))
-        .count();
-    if failed as f64 > MAX_FAILED_READ_SHARE * r.len() as f64 {
+    if let Some(failed) = too_many_failed(&r) {
         return Err(Error::Reader(format!(
             "{failed} of {} reads failed",
             r.len()
@@ -220,6 +217,15 @@ pub(crate) fn read_frames(
 }
 
 /// The readings with a valid clock.
+/// The failed count, when it is above [`MAX_FAILED_READ_SHARE`] of the reads.
+pub(crate) fn too_many_failed(r: &[FrameReading]) -> Option<usize> {
+    let failed = r
+        .iter()
+        .filter(|f| matches!(f.outcome, Outcome::Failed { .. }))
+        .count();
+    (failed as f64 > MAX_FAILED_READ_SHARE * r.len() as f64).then_some(failed)
+}
+
 pub(crate) fn clock_readings(r: &[FrameReading]) -> Vec<ClockReading> {
     r.iter()
         .filter_map(|f| match &f.outcome {
