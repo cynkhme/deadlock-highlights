@@ -24,10 +24,6 @@ use crate::read::{
 use crate::score::{rank, timeline, windows};
 use crate::video::{GRID_S, Probe, cut_clip, keyframes};
 
-/// The note of every clock segment (§4 Align, no match).
-const SEGMENT_NOTE: &str =
-    "no history match: free map, hideout, or a match missing from the history";
-
 /// Where the readings come from: the VOD's keyframes, or readings a test already has.
 pub(crate) enum FrameSource {
     Vod(Probe),
@@ -215,7 +211,6 @@ fn segment(start: &Start) -> ClockSegment {
         vod_start: times.clone().fold(f64::INFINITY, f64::min),
         vod_end: times.fold(f64::NEG_INFINITY, f64::max),
         readings: start.readings.len(),
-        note: SEGMENT_NOTE,
     }
 }
 
@@ -447,10 +442,6 @@ mod tests {
         assert_eq!(o.segments.len(), 1);
         let s = &o.segments[0];
         assert_eq!((s.vod_start, s.vod_end, s.readings), (3010.0, 3070.0, 3));
-        assert_eq!(
-            s.note,
-            "no history match: free map, hideout, or a match missing from the history"
-        );
         assert!(o.retryable);
     }
 

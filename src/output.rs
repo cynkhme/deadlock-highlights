@@ -100,7 +100,6 @@ pub struct ClockSegment {
     pub vod_start: f64,
     pub vod_end: f64,
     pub readings: usize,
-    pub note: &'static str,
 }
 
 /// A history match inside the aligned VOD span that got no game start.
