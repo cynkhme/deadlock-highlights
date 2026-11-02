@@ -39,11 +39,11 @@ pub use profile::Profile;
 /// server, the history, no clock or game start, or an offset the history does not accept.
 pub fn run(cfg: &Config) -> Result<Output, Error> {
     // The key policy is pure, so it fails before ffmpeg runs.
-    read::openai::check_key_policy(&cfg.server, cfg.openai_api_key.as_deref())?;
+    read::openai::check_key_policy(&cfg.server, cfg.server_api_key.as_deref())?;
     let probe = video::probe(&cfg.vod)?;
     // The model list is checked before the slow keyframe pass.
     let reader =
-        read::openai::OpenAiChat::new(&cfg.server, &cfg.model, cfg.openai_api_key.as_deref())?;
+        read::openai::OpenAiChat::new(&cfg.server, &cfg.model, cfg.server_api_key.as_deref())?;
     pipeline::run(cfg, &reader, &probe)
 }
 

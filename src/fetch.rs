@@ -180,7 +180,7 @@ mod tests {
         deadlock_api::blocking::Client,
     ) {
         let d = tempfile::tempdir().unwrap();
-        let mut cfg = Config::new(d.path().join("v.mp4"), 7);
+        let mut cfg = Config::new(d.path().join("v.mp4"), 7, "http://127.0.0.1:9/v1", "m");
         cfg.out = d.path().to_path_buf();
         cfg.api_base_url = "http://fake.test".into();
         let api = FakeApi::with(&[]);

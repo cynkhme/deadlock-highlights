@@ -2,11 +2,19 @@
 
 use std::process::{Command, Output};
 
-fn dlhl(args: &[&str]) -> Command {
+/// The binary with `args` and no key in its environment.
+fn bare(args: &[&str]) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_dlhl"));
     c.args(args)
-        .env_remove("DLHL_OPENAI_API_KEY")
+        .env_remove("DLHL_SERVER_API_KEY")
         .env_remove("DEADLOCK_API_KEY");
+    c
+}
+
+/// The binary with `args` and a model; no test reaches the server it names.
+fn dlhl(args: &[&str]) -> Command {
+    let mut c = bare(args);
+    c.args(["--model", "m"]);
     c
 }
 
@@ -20,7 +28,31 @@ fn check(mut c: Command, code: i32, needle: &str) -> Output {
 
 #[test]
 fn missing_account_is_2() {
-    check(dlhl(&["v.mp4"]), 2, "--account");
+    check(
+        dlhl(&["v.mp4", "--server", "http://127.0.0.1:9/v1"]),
+        2,
+        "--account",
+    );
+}
+
+#[test]
+fn missing_server_is_2() {
+    check(dlhl(&["v.mp4", "--account", "1"]), 2, "--server");
+}
+
+#[test]
+fn missing_model_is_2() {
+    check(
+        bare(&[
+            "v.mp4",
+            "--account",
+            "1",
+            "--server",
+            "http://127.0.0.1:9/v1",
+        ]),
+        2,
+        "--model",
+    );
 }
 
 #[test]
@@ -32,6 +64,8 @@ fn vod_start_without_zone_is_2() {
             "1",
             "--vod-start",
             "2026-11-02T18:00:00",
+            "--server",
+            "http://127.0.0.1:9/v1",
         ]),
         2,
         "RFC 3339",
@@ -41,7 +75,15 @@ fn vod_start_without_zone_is_2() {
 #[test]
 fn zero_parallel_is_2() {
     check(
-        dlhl(&["v.mp4", "--account", "1", "--parallel", "0"]),
+        dlhl(&[
+            "v.mp4",
+            "--account",
+            "1",
+            "--parallel",
+            "0",
+            "--server",
+            "http://127.0.0.1:9/v1",
+        ]),
         2,
         "--parallel",
     );
@@ -52,7 +94,15 @@ fn missing_profile_is_2() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("nope.json");
     check(
-        dlhl(&["v.mp4", "--account", "1", "--profile", p.to_str().unwrap()]),
+        dlhl(&[
+            "v.mp4",
+            "--account",
+            "1",
+            "--profile",
+            p.to_str().unwrap(),
+            "--server",
+            "http://127.0.0.1:9/v1",
+        ]),
         2,
         "nope.json",
     );
@@ -67,11 +117,11 @@ fn key_with_plain_http_remote_is_2() {
         "--server",
         "http://10.0.0.5:1/v1",
     ]);
-    c.env("DLHL_OPENAI_API_KEY", "x");
+    c.env("DLHL_SERVER_API_KEY", "x");
     check(
         c,
         2,
-        "DLHL_OPENAI_API_KEY is only sent over https or to a loopback server",
+        "DLHL_SERVER_API_KEY is only sent over https or to a loopback server",
     );
 }
 

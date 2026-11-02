@@ -28,10 +28,11 @@ struct Args {
     #[arg(long)]
     profile: Option<PathBuf>,
     /// Base URL of an OpenAI-compatible chat server; its key is read from
-    /// `DLHL_OPENAI_API_KEY`.
-    #[arg(long, default_value = "http://localhost:11434/v1")]
+    /// `DLHL_SERVER_API_KEY`.
+    #[arg(long)]
     server: String,
-    #[arg(long, default_value = "gemma4:e4b")]
+    /// A vision model the server serves.
+    #[arg(long)]
     model: String,
     /// Concurrent requests to the chat server.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..))]
@@ -78,7 +79,7 @@ fn hint(e: &Error) -> Option<&'static str> {
 fn message(e: &Error) -> String {
     match (e, hint(e)) {
         (Error::InsecureKey { server }, _) => format!(
-            "DLHL_OPENAI_API_KEY is only sent over https or to a loopback server, not to {server}"
+            "DLHL_SERVER_API_KEY is only sent over https or to a loopback server, not to {server}"
         ),
         (_, Some(h)) => format!("{e}; {h}"),
         (_, None) => e.to_string(),
@@ -90,7 +91,7 @@ fn vod_start(s: &str) -> Result<i64, Error> {
 }
 
 fn cli(args: Args) -> Result<u8, Error> {
-    let mut cfg = Config::new(&args.vod, args.account);
+    let mut cfg = Config::new(&args.vod, args.account, args.server, args.model);
     if let Some(out) = args.out {
         cfg.out = out;
     }
@@ -98,9 +99,7 @@ fn cli(args: Args) -> Result<u8, Error> {
     if let Some(p) = &args.profile {
         cfg.profile = Profile::load(p)?;
     }
-    cfg.server = args.server;
-    cfg.model = args.model;
-    cfg.openai_api_key = std::env::var("DLHL_OPENAI_API_KEY").ok();
+    cfg.server_api_key = std::env::var("DLHL_SERVER_API_KEY").ok();
     cfg.deadlock_api_key = std::env::var("DEADLOCK_API_KEY").ok();
     cfg.parallel = usize::from(args.parallel);
     cfg.clips_min_density = args.clips_min_density;
@@ -279,7 +278,7 @@ mod tests {
         };
         assert_eq!(
             message(&e),
-            "DLHL_OPENAI_API_KEY is only sent over https or to a loopback server, not to http://10.0.0.5:1/v1"
+            "DLHL_SERVER_API_KEY is only sent over https or to a loopback server, not to http://10.0.0.5:1/v1"
         );
         assert_eq!(error_code(&e), 2);
     }

@@ -317,7 +317,7 @@ mod tests {
     /// Account 7 anchored at `A`; `history` served, names refused, no clips.
     fn fixture(history: &Value) -> Fixture {
         let d = tempfile::tempdir().unwrap();
-        let mut cfg = Config::new(d.path().join("v.mp4"), 7);
+        let mut cfg = Config::new(d.path().join("v.mp4"), 7, "http://127.0.0.1:9/v1", "m");
         cfg.out = d.path().join("out");
         cfg.api_base_url = "http://127.0.0.1:9".into();
         cfg.vod_start = Some(A);

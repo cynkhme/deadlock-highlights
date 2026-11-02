@@ -21,7 +21,8 @@ pub struct Config {
     /// Base URL of an OpenAI-compatible chat server.
     pub server: String,
     pub model: String,
-    pub openai_api_key: Option<String>,
+    /// The key sent to `server`.
+    pub server_api_key: Option<String>,
     pub deadlock_api_key: Option<String>,
     /// Concurrent reader requests.
     pub parallel: usize,
@@ -33,7 +34,12 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(vod: impl Into<PathBuf>, account: u32) -> Config {
+    pub fn new(
+        vod: impl Into<PathBuf>,
+        account: u32,
+        server: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Config {
         let vod = vod.into();
         let mut out = vod.clone().into_os_string();
         out.push(".dlhl");
@@ -43,9 +49,9 @@ impl Config {
             account,
             vod_start: None,
             profile: Profile::default(),
-            server: "http://localhost:11434/v1".into(),
-            model: "gemma4:e4b".into(),
-            openai_api_key: None,
+            server: server.into(),
+            model: model.into(),
+            server_api_key: None,
             deadlock_api_key: None,
             parallel: 1,
             clips_min_density: 0.30,
@@ -211,13 +217,15 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp, reason = "an exact default value")]
     fn config_defaults() {
-        let c = Config::new("/v/a.mp4", 7);
+        let c = Config::new("/v/a.mp4", 7, "http://127.0.0.1:9/v1", "m");
         assert_eq!(c.out, PathBuf::from("/v/a.mp4.dlhl"));
         assert_eq!(c.account, 7);
         assert_eq!(c.parallel, 1);
         assert_eq!(c.clips_min_density, 0.30);
-        assert_eq!(c.server, "http://localhost:11434/v1");
-        assert_eq!(c.model, "gemma4:e4b");
+        assert_eq!(
+            (c.server.as_str(), c.model.as_str()),
+            ("http://127.0.0.1:9/v1", "m")
+        );
         assert_eq!(c.profile, Profile::default());
         assert!(c.vod_start.is_none() && c.clips_max.is_none());
     }
