@@ -6,8 +6,10 @@ mod clock;
 mod config;
 mod error;
 mod events;
+mod output;
 mod place;
 mod profile;
+mod score;
 #[cfg(test)]
 mod test_support;
 mod track;
