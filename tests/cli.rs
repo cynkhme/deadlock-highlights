@@ -1,4 +1,4 @@
-//! Usage errors and stage-1 failures of the binary (§6): nothing here reaches a network.
+//! Usage errors and failures before the first request: nothing here reaches a network.
 
 use std::process::{Command, Output};
 

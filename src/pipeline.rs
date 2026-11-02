@@ -1,4 +1,4 @@
-//! The stages in order (§1), behind a seam that lets tests supply readings and the API.
+//! The stages in order, behind a seam that lets tests supply readings and the API.
 
 use std::path::PathBuf;
 
@@ -40,7 +40,7 @@ fn report(cfg: &Config, p: Progress) {
     }
 }
 
-/// Stages 2-9 after the probe; `transport` replaces the network in tests.
+/// Every stage after the probe; `transport` replaces the network in tests.
 pub(crate) fn run_with(
     cfg: &Config,
     reader: &dyn HudReader,

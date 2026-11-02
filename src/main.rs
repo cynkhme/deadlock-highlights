@@ -81,7 +81,7 @@ fn cli(args: Args) -> Result<u8, Error> {
         }
     }));
 
-    // A failed run must not leave another run's result beside the VOD ([R17]).
+    // A failed run must not leave another run's result beside the VOD.
     let file = cfg.out.join("highlights.json");
     match std::fs::remove_file(&file) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {

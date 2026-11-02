@@ -1,4 +1,4 @@
-//! Stage 2: the account's match history, and the VOD's wall-clock anchor if one is known.
+//! The account's match history, and the VOD's wall-clock anchor if one is known.
 
 use std::path::Path;
 
@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::video::Probe;
 
 /// An info.json whose duration differs from the VOD's by more than this describes
-/// another file, such as the whole VOD of a section download (§4 Anchor).
+/// another file, such as the whole VOD of a section download.
 const INFO_JSON_DURATION_TOLERANCE_S: f64 = 10.0;
 
 /// Where the VOD's wall-clock start came from.

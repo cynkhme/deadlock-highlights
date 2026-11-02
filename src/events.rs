@@ -1,4 +1,4 @@
-//! Stage 8a: what happened in a match, from the streamer's point of view.
+//! What happened in a match, from the streamer's point of view.
 
 use std::collections::HashMap;
 
@@ -40,7 +40,7 @@ pub(crate) struct MatchEvents {
     pub has_paths: bool,
 }
 
-/// `me` must be one of `info.players`.
+/// What happened in the match on `me`'s side; `me` is one of `info.players`.
 pub(crate) fn events(
     info: &MatchInfo,
     me: &Player,

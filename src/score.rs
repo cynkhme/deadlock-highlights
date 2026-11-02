@@ -1,4 +1,4 @@
-//! Stage 8b: events on the VOD timeline, grouped into windows and ranked by density.
+//! Events on the VOD timeline, grouped into windows and ranked by density.
 
 use crate::events::MatchEvents;
 use crate::output::{Event, Highlight};
@@ -8,8 +8,8 @@ use crate::place::{Pause, elapsed};
 const GAP_S: f64 = 12.0;
 const LEAD_IN_S: f64 = 10.0;
 const TAIL_S: f64 = 5.0;
-/// Added to a window's span in the density, so a lone event does not outrank a fight
-/// (spec section 4, a starting value [OPEN-8]), s.
+/// Added to a window's span in the density, so a lone event does not outrank a
+/// fight, s.
 const DENSITY_PAD_S: f64 = 10.0;
 
 /// The match's scoring events on the VOD, in VOD order: kills near the streamer and
@@ -48,7 +48,7 @@ pub(crate) fn timeline(
     events
 }
 
-/// `events` in VOD order.
+/// The windows of `events`, which are in VOD order: runs at most `GAP_S` apart.
 pub(crate) fn windows(match_id: u64, events: &[Event], vod_duration: f64) -> Vec<Highlight> {
     events
         .chunk_by(|a, b| b.vod_time - a.vod_time <= GAP_S)

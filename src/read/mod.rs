@@ -1,4 +1,4 @@
-//! Stage 4: the clock read on every keyframe that passes the gate (spec section 3).
+//! The clock read on every keyframe that passes the gate.
 
 pub(crate) mod cache;
 pub(crate) mod openai;
@@ -12,7 +12,6 @@ use crate::error::{Error, Result};
 use crate::profile::Profile;
 use crate::video::Frame;
 
-/// A run whose failed reads exceed this share of its frames is an error (MVP measure).
 pub(crate) const MAX_FAILED_READ_SHARE: f64 = 0.1;
 /// With no read succeeding for this long, the server is stuck or too slow to ever finish.
 pub(crate) const MAX_READ_STALL: Duration = Duration::from_secs(300);
@@ -216,7 +215,6 @@ pub(crate) fn read_frames(
     Ok(r)
 }
 
-/// The readings with a valid clock.
 /// The failed count, when it is above [`MAX_FAILED_READ_SHARE`] of the reads.
 pub(crate) fn too_many_failed(r: &[FrameReading]) -> Option<usize> {
     let failed = r
@@ -226,6 +224,7 @@ pub(crate) fn too_many_failed(r: &[FrameReading]) -> Option<usize> {
     (failed as f64 > MAX_FAILED_READ_SHARE * r.len() as f64).then_some(failed)
 }
 
+/// The readings with a valid clock.
 pub(crate) fn clock_readings(r: &[FrameReading]) -> Vec<ClockReading> {
     r.iter()
         .filter_map(|f| match &f.outcome {

@@ -1,4 +1,4 @@
-//! Stage 5: each history match's metadata, or the reason it has none.
+//! Each history match's metadata, or the reason it has none.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,7 +12,7 @@ use crate::events::{MatchEvents, events};
 use crate::output::MatchStatus;
 use crate::place::Pause;
 
-/// A match this short is a remake: nothing happened worth a request (§4 status table).
+/// A match this short is a remake: nothing happened worth a request.
 pub(crate) const MIN_MATCH_S: u32 = 180;
 /// The standard mode; others, such as Street Brawl, restart the clock every round.
 pub(crate) const STANDARD_MODE: u32 = 1;

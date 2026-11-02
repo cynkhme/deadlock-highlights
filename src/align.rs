@@ -1,5 +1,4 @@
-//! Stage 5: game starts from clock readings, aligned to the match history by one
-//! wall-clock offset (spec section 4, reference `scratch/measure/align_sweep.py`).
+//! Game starts from clock readings, aligned to the match history by one wall-clock offset.
 
 use crate::clock::ClockReading;
 use crate::error::{Error, Result};
@@ -201,7 +200,8 @@ pub(crate) fn assign(start: i64, offset: i64, history: &[HistMatch]) -> Option<u
     (wall - h.start_time <= i64::from(h.duration_s)).then_some(h.match_id)
 }
 
-/// `history` sorted by `start_time`.
+/// The game starts in `readings`, the offset that fits them to `history`, and the match
+/// of each start; `history` is sorted by `start_time`.
 pub(crate) fn align_readings(
     readings: &[ClockReading],
     history: &[HistMatch],

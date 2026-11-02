@@ -1,4 +1,4 @@
-//! The read-stage cache: one file per key, written once when a read completes ([R9], [R14]).
+//! The read-stage cache: one file per key, written once when a read completes.
 
 use std::path::{Path, PathBuf};
 
@@ -8,7 +8,7 @@ use super::{FrameReading, ReaderIdentity, too_many_failed};
 use crate::error::{Error, Result};
 use crate::profile::{Band, Profile};
 
-/// Bumped whenever request parameters or strip preparation change: old files then miss ([R9]).
+/// Bumped whenever request parameters or strip preparation change: old files then miss.
 pub(crate) const READ_FORMAT: u32 = 1;
 
 /// Everything that decides what a read of this VOD returns.
@@ -47,7 +47,7 @@ fn path(out: &Path, k: &CacheKey) -> PathBuf {
 /// The readings stored under `k`, or `None` for a missing, unreadable or foreign file.
 ///
 /// A file is written only after a complete read, and the key holds the VOD's size, mtime
-/// and grid step, so a matching key means the whole grid is covered (§3).
+/// and grid step, so a matching key means the whole grid is covered.
 pub(crate) fn load(out: &Path, k: &CacheKey) -> Option<Vec<FrameReading>> {
     let text = std::fs::read_to_string(path(out, k)).ok()?;
     let mut v: serde_json::Value = serde_json::from_str(&text).ok()?;

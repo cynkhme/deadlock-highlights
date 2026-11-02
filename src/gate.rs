@@ -1,5 +1,4 @@
-//! The HUD-present gate: template matching of the clock digits in the band
-//! (spec section 2; reference `scratch/measure/clock_ncc.py` and `clock_window.py`).
+//! The HUD-present gate: template matching of the clock digits in the band.
 
 use std::collections::BTreeMap;
 
@@ -92,8 +91,8 @@ impl Gate {
     }
 }
 
-/// Bilinear resize with half-pixel centres, edges clamped (`clock_ncc.resize`), then
-/// centred. Sizes round half to even, as Python's `round` does.
+/// Bilinear resize with half-pixel centres and clamped edges, then centred. Sizes round
+/// half to even: the gate threshold was calibrated with that rounding.
 #[expect(clippy::many_single_char_names, reason = "the reference's own symbols")]
 fn scale(t: &[Vec<f32>], s: f64) -> Scaled {
     let (h, w) = (t.len(), t[0].len());

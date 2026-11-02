@@ -1,4 +1,4 @@
-//! Stage 7: where a match starts on the VOD, from its clock readings and pauses.
+//! Where a match starts on the VOD, from its clock readings and pauses.
 
 use crate::clock::ClockReading;
 

@@ -1,4 +1,4 @@
-//! The `OpenAI` chat-completions reader, measured on Ollama 0.40.13 (spec section 3).
+//! The `OpenAI` chat-completions reader.
 
 use std::time::Duration;
 
@@ -7,8 +7,8 @@ use base64::Engine as _;
 use super::{HudReader, ReadError, ReaderIdentity};
 use crate::error::{Error, Result};
 
-/// The measured clock-only prompt. No sample value: models echo examples on frames without
-/// a HUD (`scratch/measure/2026-11-02-local-reader.md`).
+/// The clock-only prompt. It holds no sample value: models echo an example on frames
+/// without a HUD.
 pub(crate) const PROMPT: &str = "A HUD strip from the game Deadlock. It may show the game clock as minutes:seconds. Copy the clock exactly as shown. If the strip does not show it, use an empty string. Answer with JSON only: {\"clock\": \"<clock or empty>\"}.";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
