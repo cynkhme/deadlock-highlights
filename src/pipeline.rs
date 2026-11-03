@@ -587,6 +587,35 @@ mod tests {
     }
 
     #[test]
+    fn assigned_remake_sends_no_metadata_request() {
+        let f = fixture(&json!([hist(1, A + 50, 179, 1)]));
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
+        assert_eq!(o.matches[0].status, MatchStatus::Remake);
+        assert!(
+            !f.api
+                .requests()
+                .iter()
+                .any(|p| p.starts_with("/v1/matches/"))
+        );
+    }
+
+    #[test]
+    fn assigned_other_mode_sends_no_metadata_request() {
+        let f = fixture(&json!([hist(1, A + 50, 1800, 4)]));
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
+        assert_eq!(
+            o.matches[0].status,
+            MatchStatus::UnsupportedMode { game_mode: Some(4) }
+        );
+        assert!(
+            !f.api
+                .requests()
+                .iter()
+                .any(|p| p.starts_with("/v1/matches/"))
+        );
+    }
+
+    #[test]
     fn output_serialises_field_names() {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         cache_match(&f, 1, 7, false, 300);

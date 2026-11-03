@@ -316,4 +316,20 @@ mod tests {
             assert!(run(&cfg, &probe, &api).0.is_ok(), "start {start}");
         }
     }
+
+    #[test]
+    fn history_of_startless_entries_is_not_empty() {
+        let (_d, cfg, probe, api) = setup(&serde_json::json!([entry(3, None, Some(5))]), None);
+        let h = run(&cfg, &probe, &api).0.unwrap();
+        assert_eq!(h.matches, Vec::new());
+    }
+
+    #[test]
+    fn load_history_without_anchor_is_silent() {
+        let (_d, cfg, probe, api) =
+            setup(&serde_json::json!([entry(2, Some(A), Some(1800))]), None);
+        let (h, w) = run(&cfg, &probe, &api);
+        assert_eq!(h.unwrap().anchor, None);
+        assert_eq!(w, Vec::<String>::new());
+    }
 }
