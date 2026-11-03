@@ -78,7 +78,7 @@ fn place(
     let mut hist = history.matches;
     // Assignment takes the latest match by start time.
     hist.sort_by_key(|m| m.start_time);
-    let aligned = align_readings(&clock_readings(frames), &hist, history.anchor.map(|a| a.0))?;
+    let aligned = align_readings(&clock_readings(frames), &hist, history.anchor)?;
     let offset = aligned.offset;
     notify(
         cfg,

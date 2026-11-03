@@ -19,6 +19,15 @@ pub enum AnchorSource {
     InfoJson,
 }
 
+impl std::fmt::Display for AnchorSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Flag => "--vod-start",
+            Self::InfoJson => "info.json",
+        })
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct History {
     pub matches: Vec<HistoryMatch>,
@@ -39,7 +48,7 @@ pub(crate) fn load_history(
     let anchor = cfg.vod_start.map(|v| (v, AnchorSource::Flag)).or_else(|| {
         video::info_json_start(&cfg.vod, probe, warn).map(|v| (v, AnchorSource::InfoJson))
     });
-    if let Some((a, _)) = anchor {
+    if let Some((a, from)) = anchor {
         let span = probe.duration_s.round() as i64;
         let overlaps = matches.iter().any(|m| {
             m.start_time <= a + span + ANCHOR_WINDOW_S
@@ -47,7 +56,7 @@ pub(crate) fn load_history(
         });
         if !overlaps {
             return Err(Error::History(format!(
-                "no match of account {n} overlaps the VOD's span around {a} (±{ANCHOR_WINDOW_S} s)"
+                "no match of account {n} overlaps the VOD's span around {a} from {from} (±{ANCHOR_WINDOW_S} s)"
             )));
         }
     }
@@ -173,9 +182,24 @@ mod tests {
         assert_eq!(
             e.to_string(),
             Error::History(format!(
-                "no match of account 7 overlaps the VOD's span around {A} (±600 s)"
+                "no match of account 7 overlaps the VOD's span around {A} from --vod-start (±600 s)"
             ))
             .to_string()
+        );
+    }
+
+    #[test]
+    fn overlap_error_names_info_json() {
+        let (_d, cfg, probe, api) = setup(
+            &serde_json::json!([entry(2, Some(A - 2401), Some(1800))]),
+            None,
+        );
+        info_json(&cfg, A, 3600.0);
+        let e = run(&cfg, &probe, &api).0.unwrap_err();
+        assert!(
+            e.to_string()
+                .contains(&format!("around {A} from info.json")),
+            "{e}"
         );
     }
 

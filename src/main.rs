@@ -72,7 +72,11 @@ fn error_code(e: &Error) -> u8 {
 fn hint(e: &Error) -> Option<&'static str> {
     match e {
         Error::NoClock { .. } => Some("pass --profile for another HUD layout"),
-        Error::OffsetRejected { .. } => Some("pass --vod-start with the VOD's start time"),
+        Error::OffsetRejected { anchor, .. } => Some(match anchor {
+            None => "pass --vod-start with the VOD's start time",
+            Some(AnchorSource::Flag) => "check the time passed to --vod-start",
+            Some(_) => "the info.json start time may be wrong; pass --vod-start",
+        }),
         _ => None,
     }
 }
@@ -201,12 +205,7 @@ fn progress_line(p: &Progress) -> Option<String> {
         Progress::Probed { duration_s } => format!("VOD: {}", hms(*duration_s)),
         Progress::History { matches, anchor } => format!(
             "history: {matches} matches; VOD start from {}",
-            match anchor {
-                Some(AnchorSource::Flag) => "--vod-start",
-                Some(AnchorSource::InfoJson) => "info.json",
-                Some(_) => "another source",
-                None => "the clock alone",
-            }
+            anchor.map_or_else(|| "the clock alone".to_owned(), |a| a.to_string())
         ),
         // One line per 50 frames, and the last.
         Progress::Read { done, total } if done % 50 == 0 || done == total => {
@@ -265,11 +264,28 @@ mod tests {
             offset: None,
             hits: 1,
             start_count: 4,
-            anchored: false,
+            anchor: None,
         };
         assert_eq!(
             hint(&rejected),
             Some("pass --vod-start with the VOD's start time")
+        );
+        let flagged = Error::OffsetRejected {
+            offset: None,
+            hits: 1,
+            start_count: 4,
+            anchor: Some(AnchorSource::Flag),
+        };
+        assert_eq!(hint(&flagged), Some("check the time passed to --vod-start"));
+        let from_info = Error::OffsetRejected {
+            offset: None,
+            hits: 1,
+            start_count: 4,
+            anchor: Some(AnchorSource::InfoJson),
+        };
+        assert_eq!(
+            hint(&from_info),
+            Some("the info.json start time may be wrong; pass --vod-start")
         );
         assert_eq!(hint(&Error::Usage("x".into())), None);
         let answered = Error::NoClockAnswer {
