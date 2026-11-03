@@ -22,7 +22,7 @@ Each read sends `temperature: 0`, `max_tokens: 64` and `reasoning_effort: "none"
 Results go to `<VOD>.dlhl/`, or to `--out`:
 
 - `highlights.json`: every match with its status, the game starts that matched no match, and every window, best first. It is removed when a run starts and written when the run completes.
-- `clips/<match id>-<VOD second>.<ext>`: windows with a score of at least `--clips-min-score` (default 3: two own kills, or an own kill and an assist), stream-copied. `--clips-max` caps the count. A clip that already exists is kept. dlhl never deletes clips.
+- `clips/<match id>-<VOD second>.<ext>`: windows with a score of at least `--clips-min-score` (default 3: two own kills, or an own kill and an assist), stream-copied. `--clips-max` caps the count. A clip that already exists is kept; one that ffmpeg cannot cut is left out with a warning. dlhl never deletes clips.
 - `readings/`: clock readings per VOD and settings, so a rerun skips the model and needs no server. It may be deleted.
 - `matches/`: match metadata from deadlock-api.com, so a rerun does not request it again.
 - `history.json`: the account's match history from this run.

@@ -111,7 +111,7 @@ fn place(
         .any(|m| matches!(m.status, MatchStatus::Unavailable { .. } | MatchStatus::NotIngested))
         // The history may not list a match that started after its newest entry yet.
         || unmatched_starts.iter().any(|s| s.last_reading + offset as f64 > newest as f64);
-    let clips = clips(cfg, &highlights)?;
+    let clips = clips(cfg, &highlights);
     Ok(Output {
         schema: SCHEMA,
         vod: VodInfo {
@@ -252,12 +252,20 @@ fn read_vod(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> Result<Vec<F
         &RealTime::new(),
         &|done, total| notify(cfg, Progress::Read { done, total }),
     )?;
-    cache::store(&cfg.out, &key, &cfg.profile, &r)?;
+    keep_readings(cfg, &key, &r);
     Ok(r)
 }
 
+/// Caches a fresh read under `key`; a failed write only warns, as the read itself stands.
+fn keep_readings(cfg: &Config, key: &cache::CacheKey, r: &[FrameReading]) {
+    if let Err(e) = cache::store(&cfg.out, key, &cfg.profile, r) {
+        notify(cfg, Progress::Warning(format!("readings not cached: {e}")));
+    }
+}
+
 /// Cuts the windows at or above the score threshold, best first; an existing clip is kept.
-fn clips(cfg: &Config, ranked: &[Highlight]) -> Result<Vec<PathBuf>> {
+/// A clip that cannot be cut is left out with a warning, so the run keeps its windows.
+fn clips(cfg: &Config, ranked: &[Highlight]) -> Vec<PathBuf> {
     let ext = cfg
         .vod
         .extension()
@@ -272,15 +280,23 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Result<Vec<PathBuf>> {
         // Named by match and VOD time, so runs with other settings do not collide.
         let dest = dir.join(format!("{}-{}.{ext}", h.match_id, h.start.floor() as i64));
         if !dest.exists() {
-            std::fs::create_dir_all(&dir).map_err(|source| Error::Io {
-                path: dir.clone(),
-                source,
-            })?;
-            cut_clip(&cfg.vod, h.start, h.end, &dest)?;
+            let cut = std::fs::create_dir_all(&dir)
+                .map_err(|source| Error::Io {
+                    path: dir.clone(),
+                    source,
+                })
+                .and_then(|()| cut_clip(&cfg.vod, h.start, h.end, &dest));
+            if let Err(e) = cut {
+                notify(
+                    cfg,
+                    Progress::Warning(format!("no clip {}: {e}", dest.display())),
+                );
+                continue;
+            }
         }
         out.push(dest);
     }
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -574,6 +590,54 @@ mod tests {
         cache::store(&f.cfg.out, &key, &f.cfg.profile, &frames).unwrap();
         assert_eq!(read_vod(&f.cfg, &probe, &reader).unwrap(), frames);
         assert_eq!(reader.0.load(Ordering::SeqCst), 0);
+    }
+
+    /// Collects every progress report of `f`'s runs, as its Debug text.
+    fn record(f: &mut Fixture) -> Arc<std::sync::Mutex<Vec<String>>> {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let s = seen.clone();
+        f.cfg.progress = Some(Arc::new(move |p| s.lock().unwrap().push(format!("{p:?}"))));
+        seen
+    }
+
+    #[test]
+    fn a_failed_readings_write_warns() {
+        let mut f = fixture(&json!([]));
+        let seen = record(&mut f);
+        std::fs::create_dir_all(&f.cfg.out).unwrap();
+        std::fs::write(
+            f.cfg.out.join("readings"),
+            "a file where the directory goes",
+        )
+        .unwrap();
+        let (probe, reader) = (probe(3600.0), Refused::default());
+        let key = cache_key(&f.cfg, &probe, &reader);
+        keep_readings(&f.cfg, &key, &cluster(50.0, 10, 3));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert!(
+            seen[0].starts_with("Warning(\"readings not cached: "),
+            "{seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_clip_warns_and_the_run_keeps_its_result() {
+        // The fixture's VOD file does not exist, so ffmpeg cannot cut the clip.
+        let mut f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
+        f.cfg.clips_max = None;
+        let seen = record(&mut f);
+        // Two own kills at game 300 and 301 = VOD 350 and 351: score 4, window from 340.
+        cache_match_combat(&f, 1, 7, true, &[300, 301], &[]);
+        let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
+        assert_eq!(o.highlights.len(), 1);
+        assert_eq!(o.clips, Vec::<PathBuf>::new());
+        let clip = f.cfg.out.join("clips/1-340.mp4");
+        let seen = seen.lock().unwrap();
+        let warnings: Vec<&String> = seen.iter().filter(|p| p.starts_with("Warning(")).collect();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        let head = format!("Warning(\"no clip {}: ", clip.display());
+        assert!(warnings[0].starts_with(&head), "{warnings:?}");
     }
 
     #[test]
