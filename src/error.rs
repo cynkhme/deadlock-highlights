@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::game::history::AnchorSource;
+
 /// Why a run stopped before it could place any match.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -39,7 +41,8 @@ pub enum Error {
         offset: Option<i64>,
         hits: usize,
         start_count: usize,
-        anchored: bool,
+        /// Where the VOD start the offset was held to came from, if any.
+        anchor: Option<AnchorSource>,
     },
     #[error("{}: {source}", path.display())]
     Io {

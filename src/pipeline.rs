@@ -78,7 +78,7 @@ fn place(
     let mut hist = history.matches;
     // Assignment takes the latest match by start time.
     hist.sort_by_key(|m| m.start_time);
-    let aligned = align_readings(&clock_readings(frames), &hist, history.anchor.map(|a| a.0))?;
+    let aligned = align_readings(&clock_readings(frames), &hist, history.anchor)?;
     let offset = aligned.offset;
     notify(
         cfg,
@@ -268,8 +268,9 @@ fn keep_readings(cfg: &Config, key: &cache::CacheKey, r: &[FrameReading]) {
     }
 }
 
-/// Cuts the windows at or above the score threshold, best first; an existing clip is kept.
-/// A clip that cannot be cut is left out with a warning, so the run keeps its windows.
+/// Cuts the windows at or above the score threshold, best first, replacing a clip of the
+/// same name: a window may have changed since. A clip that cannot be cut is left out with
+/// a warning, so the run keeps its windows.
 fn clips(cfg: &Config, ranked: &[Highlight]) -> Vec<PathBuf> {
     let ext = cfg
         .vod
@@ -284,20 +285,18 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Vec<PathBuf> {
     {
         // Named by match and VOD time, so runs with other settings do not collide.
         let dest = dir.join(format!("{}-{}.{ext}", h.match_id, h.start.floor() as i64));
-        if !dest.exists() {
-            let cut = std::fs::create_dir_all(&dir)
-                .map_err(|source| Error::Io {
-                    path: dir.clone(),
-                    source,
-                })
-                .and_then(|()| cut_clip(&cfg.vod, h.start, h.end, &dest));
-            if let Err(e) = cut {
-                notify(
-                    cfg,
-                    Progress::Warning(format!("no clip {}: {e}", dest.display())),
-                );
-                continue;
-            }
+        let cut = std::fs::create_dir_all(&dir)
+            .map_err(|source| Error::Io {
+                path: dir.clone(),
+                source,
+            })
+            .and_then(|()| cut_clip(&cfg.vod, h.start, h.end, &dest));
+        if let Err(e) = cut {
+            notify(
+                cfg,
+                Progress::Warning(format!("no clip {}: {e}", dest.display())),
+            );
+            continue;
         }
         out.push(dest);
     }
@@ -803,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn clips_stream_copy_named_by_match_and_time() {
+    fn clips_stream_copy_named_by_match_and_time_and_cut_again() {
         if !have_ffmpeg() {
             return;
         }
@@ -844,7 +843,7 @@ mod tests {
         let clip = f.cfg.out.join("clips/1-0.mp4");
         assert_eq!(o.clips, std::slice::from_ref(&clip));
         assert!(std::fs::metadata(&clip).unwrap().len() > 0);
-        std::fs::write(&clip, b"kept").unwrap();
+        std::fs::write(&clip, b"stale").unwrap();
         f.api.push(
             "/v1/players/7/match-history",
             200,
@@ -853,7 +852,12 @@ mod tests {
         );
         let o = run_on(&f, &p, &readings).unwrap();
         assert_eq!(o.clips, std::slice::from_ref(&clip));
-        assert_eq!(std::fs::read(&clip).unwrap(), b"kept");
+        let again = crate::video::probe(&clip).unwrap();
+        assert!(
+            (again.duration_s - p.duration_s).abs() <= 2.0,
+            "cut again: {again:?}"
+        );
+        std::fs::write(&clip, b"left").unwrap();
         f.cfg.clips_min_score = 5;
         f.api.push(
             "/v1/players/7/match-history",
@@ -863,18 +867,15 @@ mod tests {
         );
         let o = run_on(&f, &p, &readings).unwrap();
         assert_eq!(o.clips, Vec::<PathBuf>::new());
-        assert_eq!(std::fs::read(&clip).unwrap(), b"kept");
+        assert_eq!(std::fs::read(&clip).unwrap(), b"left", "never deleted");
     }
 
     /// A recorded run on one VOD: clock readings, the account's match history, the
     /// metadata of its matches and the highlights found then. Not in git.
     #[test]
+    #[ignore = "needs the local testdata/recorded-run; run with --include-ignored"]
     fn recorded_run_places_12() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/recorded-run");
-        if !src.is_dir() {
-            eprintln!("skipping: {} is absent", src.display());
-            return;
-        }
         let read = |name: &str| -> Value {
             serde_json::from_str(&std::fs::read_to_string(src.join(name)).unwrap()).unwrap()
         };

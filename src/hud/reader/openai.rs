@@ -19,36 +19,78 @@ pub(crate) struct OpenAiChat {
     auth: Option<String>,
 }
 
+/// A server URL split around its host; the user info before the host is dropped.
+struct Url<'a> {
+    scheme: &'a str,
+    host: &'a str,
+    /// The `:port`, if any.
+    port: &'a str,
+    path: &'a str,
+}
+
+fn split_url(server: &str) -> Option<Url<'_>> {
+    let (scheme, rest) = server.split_once("://")?;
+    let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let (host, port) = match host_port.strip_prefix('[') {
+        Some(v6) => v6.split_once(']')?,
+        None => host_port.split_at(host_port.find(':').unwrap_or(host_port.len())),
+    };
+    Some(Url {
+        scheme,
+        host,
+        port,
+        path,
+    })
+}
+
+fn is_loopback(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host == "::1"
+        || host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 /// A key goes only over https or to a loopback server, so it never crosses a network in
 /// clear text.
 fn check_key_policy(server: &str, key: Option<&str>) -> Result<()> {
     if key.is_none() {
         return Ok(());
     }
-    let lower = server.to_ascii_lowercase();
-    if lower.starts_with("https://") {
-        return Ok(());
-    }
-    let loopback = lower.strip_prefix("http://").is_some_and(|rest| {
-        let authority = rest.split('/').next().unwrap_or("");
-        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-        let host = match host.strip_prefix('[') {
-            Some(v6) => v6.split(']').next().unwrap_or(""),
-            None => host.split(':').next().unwrap_or(""),
-        };
-        host == "localhost"
-            || host == "::1"
-            || host
-                .parse::<std::net::Ipv4Addr>()
-                .is_ok_and(|ip| ip.is_loopback())
+    let ok = split_url(server).is_some_and(|u| {
+        u.scheme.eq_ignore_ascii_case("https")
+            || (u.scheme.eq_ignore_ascii_case("http") && is_loopback(u.host))
     });
-    if loopback {
+    if ok {
         Ok(())
     } else {
         Err(Error::InsecureKey {
             server: server.to_owned(),
         })
     }
+}
+
+/// The server as the cache key holds it: one name for every loopback address, so a server
+/// reached as `localhost` or `127.0.0.1` keeps its readings, and no user info, so no
+/// password is written beside them.
+fn key_server(server: &str) -> String {
+    let Some(u) = split_url(server) else {
+        return server.to_owned();
+    };
+    let host = if is_loopback(u.host) {
+        "localhost".to_owned()
+    } else if u.host.contains(':') {
+        format!("[{}]", u.host.to_ascii_lowercase())
+    } else {
+        u.host.to_ascii_lowercase()
+    };
+    format!(
+        "{}://{host}{}{}",
+        u.scheme.to_ascii_lowercase(),
+        u.port,
+        u.path
+    )
 }
 
 /// A blank clock band at the size `read` is sent, for the preflight request.
@@ -118,7 +160,7 @@ impl HudReader for OpenAiChat {
     fn identity(&self) -> ReaderIdentity {
         ReaderIdentity {
             protocol: "openai-chat",
-            server: self.server.clone(),
+            server: key_server(&self.server),
             model: self.model.clone(),
             prompt: PROMPT,
         }
@@ -389,6 +431,24 @@ mod tests {
     }
 
     #[test]
+    fn loopback_servers_share_a_cache_key() {
+        let id = |s: &str| OpenAiChat::new(s, "m", None).unwrap().identity().server;
+        assert_eq!(id("http://localhost:11434/v1"), "http://localhost:11434/v1");
+        for same in [
+            "http://127.0.0.1:11434/v1",
+            "http://[::1]:11434/v1/",
+            "HTTP://LocalHost:11434/v1",
+            "http://user:pw@127.0.0.2:11434/v1",
+        ] {
+            assert_eq!(id(same), "http://localhost:11434/v1", "{same}");
+        }
+        assert_eq!(id("http://10.0.0.5:11434/v1"), "http://10.0.0.5:11434/v1");
+        assert_eq!(id("http://[fe80::1]:11434/v1"), "http://[fe80::1]:11434/v1");
+        assert_eq!(id("https://localhost:8443/v1"), "https://localhost:8443/v1");
+        assert_eq!(id("http://localhost"), "http://localhost");
+    }
+
+    #[test]
     fn fenced_and_unfenced_answers() {
         let fenced = "```json\n{\"clock\": \"5:17\"}\n```";
         let (base, _) = server(vec![chat(fenced), chat(r#"{"clock":"5:17"}"#)]);
@@ -486,6 +546,8 @@ mod tests {
             "http://192.168.1.2/v1",
             "ftp://127.0.0.1/",
             "http://127.0.0.1.nip.io/v1",
+            "http://localhost@evil.com/v1",
+            "http://evil.com/@localhost/v1",
         ] {
             let e = check_key_policy(bad, k).unwrap_err();
             assert!(

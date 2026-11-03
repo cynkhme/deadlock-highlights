@@ -26,8 +26,8 @@ pub struct Output {
     /// an unmatched start was read after the newest history match started.
     pub retryable: bool,
     pub highlights: Vec<Highlight>,
-    /// Clip files of this run's settings, cut now or kept from an earlier run; a clip that
-    /// could not be cut is missing, with a [`Progress::Warning`].
+    /// Clip files of this run's settings, all cut now; a clip that could not be cut is
+    /// missing, with a [`Progress::Warning`].
     pub clips: Vec<PathBuf>,
 }
 
