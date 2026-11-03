@@ -16,7 +16,8 @@ const STANDARD_MODE: u32 = 1;
 pub(crate) trait MatchSource {
     /// The account's matches, as align needs them.
     fn history(&mut self) -> Result<Vec<HistoryMatch>>;
-    /// The match's timing and events, or why there are none. `h` passed [`skip_status`].
+    /// The match's timing and events, or why there are none. Call only for a match
+    /// [`skip_status`] returns `None` for; an adapter may assume it.
     fn fetch(&mut self, h: &HistoryMatch) -> Fetched;
 }
 

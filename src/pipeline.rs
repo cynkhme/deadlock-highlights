@@ -135,7 +135,8 @@ fn place(
     })
 }
 
-/// Fetches and places each assigned match once, in VOD order; returns its reports and windows.
+/// Places each assigned match once, in VOD order, fetching only those [`skip_status`] passes;
+/// returns its reports and windows.
 fn place_matches(
     cfg: &Config,
     source: &mut dyn MatchSource,
@@ -643,7 +644,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut cfg = Config::new(d.path().join("v.mp4"), 7, "http://127.0.0.1:9/v1", "m");
         cfg.out = d.path().join("out");
-        // Nothing listens on port 9, so the history request fails.
+        // Nothing listens on port 9, so the history request fails after the crate's two
+        // connect retries (1 s + 2 s).
         cfg.deadlock_api_url = "http://127.0.0.1:9".into();
         let reader = Refused::default();
         let e = super::run(&cfg, &reader, &probe(3600.0)).unwrap_err();
