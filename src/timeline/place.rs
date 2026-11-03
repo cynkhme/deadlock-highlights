@@ -54,6 +54,8 @@ pub(crate) fn vod_start(readings: &[ClockReading], pauses: &[Pause]) -> Option<f
 
 /// Each later start of a match sits after the earlier ones by the pauses between them, so a
 /// gap that no running sum of the metadata pauses explains means the metadata lost a pause.
+/// The first start on the VOD may come after some pauses already, so the gaps are measured
+/// from whichever running sum (0 included) explains them all.
 /// Returns the gaps and the running sums when they disagree.
 pub(crate) fn pause_mismatch(
     starts_vod_s: &[i64],
@@ -71,11 +73,16 @@ pub(crate) fn pause_mismatch(
             Some(*acc)
         })
         .collect();
-    let explained = |g: i64| {
-        sums.iter()
-            .any(|s| (g as f64 - s).abs() <= PAUSE_TOLERANCE_S)
+    let explained_from = |base: f64| {
+        gaps.iter().all(|&g| {
+            sums.iter()
+                .any(|s| (g as f64 - (s - base)).abs() <= PAUSE_TOLERANCE_S)
+        })
     };
-    (!gaps.iter().all(|&g| explained(g))).then_some((gaps, sums))
+    let explained = std::iter::once(0.0)
+        .chain(sums.iter().copied())
+        .any(explained_from);
+    (!explained).then_some((gaps, sums))
 }
 
 #[cfg(test)]
@@ -146,6 +153,13 @@ mod tests {
         assert_eq!(m, (vec![40], vec![]));
         assert!(pause_mismatch(&[0, 40], &[p(300.0, 34.0)]).is_some());
         assert!(pause_mismatch(&[0, 40], &[p(300.0, 35.0)]).is_none());
+    }
+
+    #[test]
+    fn pause_mismatch_none_when_the_vod_starts_after_a_pause() {
+        let pauses = [p(300.0, 60.0), p(900.0, 40.0)];
+        assert_eq!(pause_mismatch(&[60, 100], &pauses), None);
+        assert!(pause_mismatch(&[60, 130], &pauses).is_some());
     }
 
     #[test]
