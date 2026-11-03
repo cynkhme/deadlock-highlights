@@ -272,6 +272,11 @@ mod tests {
             Some("pass --vod-start with the VOD's start time")
         );
         assert_eq!(hint(&Error::Usage("x".into())), None);
+        let answered = Error::NoClockAnswer {
+            answered: 2,
+            first: String::new(),
+        };
+        assert_eq!(hint(&answered), None);
         assert!(message(&no_clock).ends_with("; pass --profile for another HUD layout"));
     }
 

@@ -19,6 +19,13 @@ pub enum Error {
     History(String),
     #[error("no frame shows the clock in the band {band} (best gate score {best_gate:.2})")]
     NoClock { band: String, best_gate: f32 },
+    /// Frames passed the clock gate, but no answer of the model held a valid clock: the model
+    /// or its server failed them, as with empty answers from a model that spends its token
+    /// budget on hidden thinking.
+    #[error(
+        "the model answered {answered} frames that passed the clock gate, none with a valid clock (first answer: {first:?})"
+    )]
+    NoClockAnswer { answered: usize, first: String },
     /// The model server is down, stalled, refused the request, or failed too many reads.
     #[error("{0}")]
     Reader(String),

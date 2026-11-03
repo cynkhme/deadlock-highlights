@@ -239,9 +239,20 @@ pub(crate) fn clock_readings(r: &[FrameReading]) -> Vec<ClockReading> {
         .collect()
 }
 
-/// Fails when no frame showed a clock, naming the band and the best gate score.
+/// Fails when no frame showed a clock: with the model's answers when frames passed the
+/// gate, else naming the band and the best gate score.
 pub(crate) fn require_clock(r: &[FrameReading], profile: &Profile) -> Result<()> {
     if clock_readings(r).is_empty() {
+        let mut answers = r.iter().filter_map(|f| match &f.outcome {
+            Outcome::Read { raw } => Some(raw),
+            _ => None,
+        });
+        if let Some(first) = answers.next() {
+            return Err(Error::NoClockAnswer {
+                answered: 1 + answers.count(),
+                first: first.clone(),
+            });
+        }
         let best_gate = r.iter().map(|f| f.gate).fold(-1.0_f32, f32::max);
         return Err(Error::NoClock {
             band: format!(
@@ -541,14 +552,14 @@ mod tests {
             },
             FrameReading {
                 pts_ms: 30_000,
-                gate: 0.45,
-                outcome: Outcome::Read { raw: "{}".into() },
+                gate: 0.35,
+                outcome: Outcome::NoHud,
             },
         ];
         let e = require_clock(&r, &Profile::default()).unwrap_err();
         let m = e.to_string();
         assert!(
-            !m.contains("--") && m.contains("0.45") && m.contains("360x64 at center_x=0.5"),
+            !m.contains("--") && m.contains("0.35") && m.contains("360x64 at center_x=0.5"),
             "{m}"
         );
         let ok = vec![FrameReading {
@@ -559,5 +570,28 @@ mod tests {
             },
         }];
         assert!(require_clock(&ok, &Profile::default()).is_ok());
+    }
+
+    #[test]
+    fn answers_without_a_clock_are_not_a_missing_clock() {
+        let frame = |gate, outcome| FrameReading {
+            pts_ms: 0,
+            gate,
+            outcome,
+        };
+        let r = vec![
+            frame(0.2, Outcome::NoHud),
+            frame(0.9, Outcome::Read { raw: String::new() }),
+            frame(0.95, Outcome::Read { raw: "{}".into() }),
+        ];
+        let e = require_clock(&r, &Profile::default()).unwrap_err();
+        assert!(
+            matches!(&e, Error::NoClockAnswer { answered: 2, first } if first.is_empty()),
+            "{e:?}"
+        );
+        assert_eq!(
+            e.to_string(),
+            "the model answered 2 frames that passed the clock gate, none with a valid clock (first answer: \"\")"
+        );
     }
 }

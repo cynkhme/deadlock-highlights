@@ -257,7 +257,12 @@ fn read_vod(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> Result<Vec<F
 }
 
 /// Caches a fresh read under `key`; a failed write only warns, as the read itself stands.
+/// A read without any clock is not kept, so a rerun after a fix to the model server reads
+/// again.
 fn keep_readings(cfg: &Config, key: &cache::CacheKey, r: &[FrameReading]) {
+    if clock_readings(r).is_empty() {
+        return;
+    }
     if let Err(e) = cache::store(&cfg.out, key, &cfg.profile, r) {
         notify(cfg, Progress::Warning(format!("readings not cached: {e}")));
     }
@@ -619,6 +624,24 @@ mod tests {
             seen[0].starts_with("Warning(\"readings not cached: "),
             "{seen:?}"
         );
+    }
+
+    #[test]
+    fn a_read_without_a_clock_is_not_cached() {
+        let f = fixture(&json!([]));
+        let (probe, reader) = (probe(3600.0), Refused::default());
+        let key = cache_key(&f.cfg, &probe, &reader);
+        let empty = FrameReading {
+            pts_ms: 0,
+            gate: 0.9,
+            outcome: Outcome::Read { raw: String::new() },
+        };
+        keep_readings(&f.cfg, &key, std::slice::from_ref(&empty));
+        assert_eq!(cache::load(&f.cfg.out, &key), None);
+        let mut r = cluster(50.0, 10, 3);
+        r.push(empty);
+        keep_readings(&f.cfg, &key, &r);
+        assert_eq!(cache::load(&f.cfg.out, &key), Some(r));
     }
 
     #[test]
