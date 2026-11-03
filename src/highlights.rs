@@ -1,4 +1,4 @@
-//! Events on the VOD timeline, grouped into windows and ranked by density.
+//! Events on the VOD timeline, grouped into windows and ranked by the streamer's own actions.
 
 use crate::game::events::MatchEvents;
 use crate::output::{Event, Highlight};
@@ -14,18 +14,9 @@ const TAIL_S: f64 = 5.0;
 const COMBAT_LEAD_S: f64 = 3.0;
 const MAX_LEAD_S: f64 = 20.0;
 const MAX_TAIL_S: f64 = 30.0;
-/// Added to a window's span in the density, so a lone event does not outrank a
-/// fight, s.
-const DENSITY_PAD_S: f64 = 10.0;
-/// Points of a window, per event of each kind; the streamer's own kill also counts as a
-/// death.
-const DEATH_POINTS: u32 = 1;
-const OWN_KILL_POINTS: u32 = 2;
-const ASSIST_POINTS: u32 = 1;
-const OBJECTIVE_POINTS: u32 = 1;
-/// The density of a window holding only one kill by the streamer.
-pub(crate) const LONE_OWN_KILL_DENSITY: f64 =
-    (DEATH_POINTS + OWN_KILL_POINTS) as f64 / DENSITY_PAD_S;
+/// A window's points per own kill and per assist of the streamer; other events score 0.
+pub(crate) const OWN_KILL_POINTS: u32 = 2;
+pub(crate) const ASSIST_POINTS: u32 = 1;
 
 /// The match's scoring events on the VOD, in VOD order: kills near the streamer and
 /// objectives, up to the end of the streamer's stream of the match.
@@ -138,16 +129,12 @@ pub(crate) fn windows(
                 end = end.max((m + TAIL_S).min(last + MAX_TAIL_S + TAIL_S));
             }
             let end = end.min(vod_duration);
-            let score = DEATH_POINTS * deaths
-                + OWN_KILL_POINTS * my_kills
-                + ASSIST_POINTS * my_assists
-                + OBJECTIVE_POINTS * objectives;
+            let score = OWN_KILL_POINTS * my_kills + ASSIST_POINTS * my_assists;
             Highlight {
                 match_id,
                 start,
                 end,
                 score,
-                density: f64::from(score) / (last - first + DENSITY_PAD_S),
                 combat_s: combat
                     .iter()
                     .filter(|&&c| (start..=end).contains(&c))
@@ -163,12 +150,12 @@ pub(crate) fn windows(
         .collect()
 }
 
-/// Best first: by density, then by score, then earlier.
+/// Best first: by score, then by combat seconds, then earlier.
 pub(crate) fn rank(all: &mut [Highlight]) {
     all.sort_by(|a, b| {
-        b.density
-            .total_cmp(&a.density)
-            .then(b.score.cmp(&a.score))
+        b.score
+            .cmp(&a.score)
+            .then(b.combat_s.cmp(&a.combat_s))
             .then(a.start.total_cmp(&b.start))
     });
 }
@@ -207,59 +194,35 @@ mod tests {
         }
     }
 
-    fn close(a: f64, b: f64) -> bool {
-        (a - b).abs() < 1e-9
-    }
-
     #[test]
-    fn lone_own_kill_density_030() {
-        let w = windows(1, &[ev(100.0, true, false)], &[], None, 10_000.0);
-        assert_eq!((w[0].score, w[0].deaths, w[0].my_kills), (3, 1, 1));
-        assert!(close(w[0].density, 0.30));
-        assert_eq!((w[0].start, w[0].end), (90.0, 105.0));
-    }
-
-    #[test]
-    fn three_own_kills_in_5s_060() {
+    fn score_counts_own_actions_only() {
+        let mut own_death = ev(103.0, false, false);
+        own_death.my_death = true;
+        let mut objective = ev(104.0, false, false);
+        objective.objective = true;
         let e = [
             ev(100.0, true, false),
-            ev(102.5, true, false),
-            ev(105.0, true, false),
+            ev(101.0, false, true),
+            ev(102.0, false, false),
+            own_death,
+            objective,
         ];
         let w = windows(1, &e, &[], None, 10_000.0);
-        assert_eq!(w.len(), 1);
-        assert_eq!(w[0].score, 9);
-        assert!(close(w[0].density, 0.60));
+        assert_eq!((w.len(), w[0].score), (1, 3));
     }
 
     #[test]
-    fn brawl_60s_one_own_kill_014() {
-        let mut e: Vec<Event> = (0..8)
-            .map(|i| ev(100.0 + f64::from(i) * 60.0 / 7.0, false, false))
-            .collect();
-        e[3].my_kill = true;
-        let w = windows(1, &e, &[], None, 10_000.0);
-        assert_eq!(w.len(), 1);
-        assert_eq!(w[0].score, 10);
-        assert!(close(w[0].density, 10.0 / 70.0));
-    }
-
-    #[test]
-    #[allow(clippy::float_cmp, reason = "the same arithmetic on the same values")]
-    fn lone_own_kill_has_the_named_density() {
-        let w = windows(1, &[ev(100.0, true, false)], &[], None, 3600.0);
-        assert_eq!(w[0].density, LONE_OWN_KILL_DENSITY);
-    }
-
-    #[test]
-    fn assist_and_objective_weights() {
-        let mut o = ev(101.0, false, false);
-        o.objective = true;
-        let w = windows(1, &[ev(100.0, false, true), o], &[], None, 10_000.0);
-        assert_eq!(
-            (w[0].score, w[0].my_assists, w[0].objectives, w[0].deaths),
-            (3, 1, 1, 1)
+    fn chain_of_zero_point_events_scores_0() {
+        let mut objective = ev(101.0, false, false);
+        objective.objective = true;
+        let w = windows(
+            1,
+            &[ev(100.0, false, false), objective],
+            &[],
+            None,
+            10_000.0,
         );
+        assert_eq!((w.len(), w[0].score), (1, 0));
     }
 
     #[test]
@@ -377,38 +340,34 @@ mod tests {
         assert_eq!(vod_events(&m, 0.0, &[], 2000.0).len(), 1);
     }
 
+    fn hl(score: u32, combat_s: u32, start: f64) -> Highlight {
+        Highlight {
+            match_id: 1,
+            start,
+            end: start + 10.0,
+            score,
+            combat_s,
+            deaths: 0,
+            my_kills: 0,
+            my_assists: 0,
+            my_deaths: 0,
+            objectives: 0,
+            events: Vec::new(),
+        }
+    }
+
     #[test]
-    fn rank_by_density_then_score() {
-        let mut all = windows(1, &[ev(100.0, true, false)], &[], None, 1e4); // 0.30, score 3
-        all.extend(windows(
-            2,
-            &[
-                ev(500.0, true, false),
-                ev(502.5, true, false),
-                ev(505.0, true, false),
-            ],
-            &[],
-            None,
-            1e4,
-        )); // 0.60
-        all.extend(windows(
-            3,
-            &[ev(900.0, false, false), ev(910.0, true, false)],
-            &[],
-            None,
-            1e4,
-        )); // 4 / 20 = 0.20
-        all.extend(windows(
-            4,
-            &[ev(1300.0, true, false), ev(1300.0, true, false)],
-            &[],
-            None,
-            1e4,
-        )); // 6 / 10 = 0.60, score 6
+    fn rank_by_score_then_combat_then_start() {
+        let mut all = [
+            hl(3, 0, 200.0),
+            hl(3, 10, 300.0),
+            hl(5, 0, 400.0),
+            hl(3, 10, 100.0),
+        ];
         rank(&mut all);
         assert_eq!(
-            all.iter().map(|h| h.match_id).collect::<Vec<_>>(),
-            [2, 4, 1, 3]
+            all.iter().map(|h| h.start).collect::<Vec<_>>(),
+            [400.0, 100.0, 300.0, 200.0]
         );
     }
 

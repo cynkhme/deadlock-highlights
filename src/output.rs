@@ -122,7 +122,8 @@ pub struct Event {
     pub net_worth_ratio: Option<f64>,
 }
 
-/// Events at most 12 s apart, padded, with their score and density.
+/// Events at most 12 s apart, padded and widened by the streamer's combat, with their score:
+/// 2 per own kill and 1 per assist.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct Highlight {
@@ -130,8 +131,6 @@ pub struct Highlight {
     pub start: f64,
     pub end: f64,
     pub score: u32,
-    /// Score per second of the events' span plus 10 s.
-    pub density: f64,
     /// Seconds of the window in which the streamer was in combat with players.
     pub combat_s: u32,
     pub deaths: u32,

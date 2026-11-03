@@ -26,8 +26,8 @@ pub struct Config {
     pub deadlock_api_key: Option<String>,
     /// Concurrent reader requests.
     pub parallel: u16,
-    /// Windows at or above this density are cut as clips.
-    pub clips_min_density: f64,
+    /// Windows scoring at least this are cut as clips.
+    pub clips_min_score: u32,
     pub clips_max: Option<usize>,
     pub progress: Option<Arc<dyn Fn(Progress) + Send + Sync>>,
     pub(crate) deadlock_api_url: String,
@@ -36,9 +36,9 @@ pub struct Config {
 impl Config {
     /// Concurrent reader requests unless set otherwise.
     pub const DEFAULT_PARALLEL: u16 = 1;
-    /// The clip threshold unless set otherwise: the density of a window holding only one
-    /// kill by the streamer.
-    pub const DEFAULT_CLIPS_MIN_DENSITY: f64 = crate::highlights::LONE_OWN_KILL_DENSITY;
+    /// The clip threshold unless set otherwise: two own kills, or an own kill and an assist.
+    pub const DEFAULT_CLIPS_MIN_SCORE: u32 =
+        crate::highlights::OWN_KILL_POINTS + crate::highlights::ASSIST_POINTS;
 
     pub fn new(
         vod: impl Into<PathBuf>,
@@ -60,7 +60,7 @@ impl Config {
             server_api_key: None,
             deadlock_api_key: None,
             parallel: Config::DEFAULT_PARALLEL,
-            clips_min_density: Config::DEFAULT_CLIPS_MIN_DENSITY,
+            clips_min_score: Config::DEFAULT_CLIPS_MIN_SCORE,
             clips_max: None,
             progress: None,
             deadlock_api_url: DEADLOCK_API_URL.into(),
@@ -197,15 +197,14 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp, reason = "an exact default value")]
     fn config_defaults() {
         let c = Config::new("/v/a.mp4", 7, "http://127.0.0.1:9/v1", "m");
         assert_eq!(c.out, PathBuf::from("/v/a.mp4.dlhl"));
         assert_eq!(c.account, 7);
         assert_eq!(c.parallel, Config::DEFAULT_PARALLEL);
-        assert_eq!(c.clips_min_density, Config::DEFAULT_CLIPS_MIN_DENSITY);
-        // The README states this value as the density of a lone own kill.
-        assert_eq!(Config::DEFAULT_CLIPS_MIN_DENSITY, 0.30);
+        assert_eq!(c.clips_min_score, Config::DEFAULT_CLIPS_MIN_SCORE);
+        // The README states this value as two own kills, or an own kill and an assist.
+        assert_eq!(Config::DEFAULT_CLIPS_MIN_SCORE, 3);
         assert_eq!(
             (c.server.as_str(), c.model.as_str()),
             ("http://127.0.0.1:9/v1", "m")

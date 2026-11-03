@@ -255,7 +255,7 @@ fn read_vod(cfg: &Config, probe: &Probe, reader: &dyn HudReader) -> Result<Vec<F
     Ok(r)
 }
 
-/// Cuts the windows at or above the density threshold, best first; an existing clip is kept.
+/// Cuts the windows at or above the score threshold, best first; an existing clip is kept.
 fn clips(cfg: &Config, ranked: &[Highlight]) -> Result<Vec<PathBuf>> {
     let ext = cfg
         .vod
@@ -265,7 +265,7 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     for h in ranked
         .iter()
-        .filter(|h| h.density >= cfg.clips_min_density)
+        .filter(|h| h.score >= cfg.clips_min_score)
         .take(cfg.clips_max.unwrap_or(usize::MAX))
     {
         // Named by match and VOD time, so runs with other settings do not collide.
@@ -356,16 +356,16 @@ mod tests {
 
     /// Me (7, slot 1) kills 8 at game time `kill_at`; a path for me unless `paths` is false.
     fn cache_match(f: &Fixture, id: u64, me: u32, paths: bool, kill_at: u32) {
-        cache_match_combat(f, id, me, paths, kill_at, &[]);
+        cache_match_combat(f, id, me, paths, &[kill_at], &[]);
     }
 
-    /// [`cache_match`] with my path's combat types.
+    /// [`cache_match`] with my kills of 8 at the game times `kills` and my path's combat types.
     fn cache_match_combat(
         f: &Fixture,
         id: u64,
         me: u32,
         paths: bool,
-        kill_at: u32,
+        kills: &[u32],
         combat: &[u32],
     ) {
         let paths = paths.then(|| vec![path(1, &[1000; 1801], &[100; 1801], combat)]);
@@ -373,7 +373,15 @@ mod tests {
             1800,
             vec![
                 player(me, 1, 0, &[]),
-                player(8, 2, 1, &[(kill_at, Some(1), Some(1000.0))]),
+                player(
+                    8,
+                    2,
+                    1,
+                    &kills
+                        .iter()
+                        .map(|&t| (t, Some(1), Some(1000.0)))
+                        .collect::<Vec<_>>(),
+                ),
             ],
             paths,
             &json!({}),
@@ -405,7 +413,7 @@ mod tests {
         let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
         let mut combat = vec![0; 1801];
         combat[302..=311].fill(1);
-        cache_match_combat(&f, 1, 7, true, 300, &combat);
+        cache_match_combat(&f, 1, 7, true, &[300], &combat);
         let o = run(&f, 3600.0, &cluster(50.0, 10, 3)).unwrap();
         let h = &o.highlights[0];
         assert!((h.end - 365.0).abs() < 1e-9, "end {}", h.end);
@@ -717,8 +725,8 @@ mod tests {
             .unwrap();
         assert!(st.success());
         f.cfg.clips_max = None;
-        // A lone own kill at game time 10: density 3 / 10 = 0.30, the default threshold.
-        cache_match(&f, 1, 7, false, 10);
+        // Two own kills at game times 10 and 11: score 4, over the default threshold.
+        cache_match_combat(&f, 1, 7, false, &[10, 11], &[]);
         let readings = vec![
             reading(1.0, "0:01"),
             reading(2.0, "0:02"),
@@ -744,6 +752,16 @@ mod tests {
         );
         let o = run_on(&f, &p, &readings).unwrap();
         assert_eq!(o.clips, std::slice::from_ref(&clip));
+        assert_eq!(std::fs::read(&clip).unwrap(), b"kept");
+        f.cfg.clips_min_score = 5;
+        f.api.push(
+            "/v1/players/7/match-history",
+            200,
+            &json!([hist(1, A, 1800, 1)]).to_string(),
+            None,
+        );
+        let o = run_on(&f, &p, &readings).unwrap();
+        assert_eq!(o.clips, Vec::<PathBuf>::new());
         assert_eq!(std::fs::read(&clip).unwrap(), b"kept");
     }
 

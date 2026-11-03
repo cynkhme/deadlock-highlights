@@ -9,7 +9,7 @@ use clap::Parser;
 use dlhl::{AnchorSource, Config, Error, Highlight, MatchStatus, Output, Profile, Progress};
 
 /// Finds the fights of a Deadlock VOD from the game clock on screen and deadlock-api.com
-/// match data, and cuts the densest ones as clips.
+/// match data, and cuts those with the most own kills and assists as clips.
 #[derive(Parser)]
 #[command(version)]
 struct Args {
@@ -37,9 +37,10 @@ struct Args {
     /// Concurrent requests to the chat server.
     #[arg(long, default_value_t = Config::DEFAULT_PARALLEL, value_parser = clap::value_parser!(u16).range(1..))]
     parallel: u16,
-    /// Windows at or above this density are cut as clips and listed here.
-    #[arg(long, default_value_t = Config::DEFAULT_CLIPS_MIN_DENSITY)]
-    clips_min_density: f64,
+    /// Windows scoring at least this (2 per own kill, 1 per assist) are cut as clips and
+    /// listed here.
+    #[arg(long, default_value_t = Config::DEFAULT_CLIPS_MIN_SCORE)]
+    clips_min_score: u32,
     /// At most this many clips, best first.
     #[arg(long)]
     clips_max: Option<usize>,
@@ -102,7 +103,7 @@ fn cli(args: Args) -> Result<u8, Error> {
     cfg.server_api_key = std::env::var("DLHL_SERVER_API_KEY").ok();
     cfg.deadlock_api_key = std::env::var("DEADLOCK_API_KEY").ok();
     cfg.parallel = args.parallel;
-    cfg.clips_min_density = args.clips_min_density;
+    cfg.clips_min_score = args.clips_min_score;
     cfg.clips_max = args.clips_max;
     cfg.progress = Some(Arc::new(|p| {
         if let Some(line) = progress_line(&p) {
@@ -123,7 +124,7 @@ fn cli(args: Args) -> Result<u8, Error> {
     }
     let output = dlhl::run(&cfg)?;
     write_atomic(&file, &output)?;
-    print_table(&output, cfg.clips_min_density, &file);
+    print_table(&output, cfg.clips_min_score, &file);
     if output.retryable {
         eprintln!(
             "a rerun may place more: see `retryable` in {}",
@@ -160,28 +161,28 @@ fn event_counts(h: &Highlight) -> String {
     )
 }
 
-fn print_table(o: &Output, min_density: f64, file: &Path) {
+fn print_table(o: &Output, min_score: u32, file: &Path) {
     let shown: Vec<&Highlight> = o
         .highlights
         .iter()
-        .filter(|h| h.density >= min_density)
+        .filter(|h| h.score >= min_score)
         .collect();
     let mut w = std::io::stdout().lock();
     if !shown.is_empty() {
         let _ = writeln!(
             w,
-            "{:>4}  {:>8}  {:>5}  {:>7}  {:>5}  {:>10}  events",
-            "rank", "start", "len s", "density", "score", "match"
+            "{:>4}  {:>8}  {:>5}  {:>8}  {:>5}  {:>10}  events",
+            "rank", "start", "len s", "combat s", "score", "match"
         );
     }
     for (i, h) in shown.iter().enumerate() {
         let _ = writeln!(
             w,
-            "{:>4}  {:>8}  {:>5.0}  {:>7.2}  {:>5}  {:>10}  {}",
+            "{:>4}  {:>8}  {:>5.0}  {:>8}  {:>5}  {:>10}  {}",
             i + 1,
             hms(h.start),
             h.end - h.start,
-            h.density,
+            h.combat_s,
             h.score,
             h.match_id,
             event_counts(h)
@@ -287,7 +288,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp, reason = "the same constant")]
     fn flag_defaults_are_the_library_defaults() {
         let a = Args::try_parse_from([
             "dlhl",
@@ -301,7 +301,25 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(a.parallel, Config::DEFAULT_PARALLEL);
-        assert_eq!(a.clips_min_density, Config::DEFAULT_CLIPS_MIN_DENSITY);
+        assert_eq!(a.clips_min_score, Config::DEFAULT_CLIPS_MIN_SCORE);
+    }
+
+    #[test]
+    fn clips_min_score_flag_parses() {
+        let a = Args::try_parse_from([
+            "dlhl",
+            "v",
+            "--account",
+            "1",
+            "--server",
+            "s",
+            "--model",
+            "m",
+            "--clips-min-score",
+            "5",
+        ])
+        .unwrap();
+        assert_eq!(a.clips_min_score, 5);
     }
 
     #[test]
