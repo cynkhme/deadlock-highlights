@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.98"
 description = "Highlight windows and clips for Deadlock VODs from the game clock and deadlock-api.com match data"
 license = "MIT"
+repository = "https://github.com/cynkhme/deadlock-highlights"
 publish = false
 # An allowlist, so local data beside the sources is never packaged.
 include = ["/src/**", "/tests/**", "/templates/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]

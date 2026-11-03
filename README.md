@@ -1,10 +1,10 @@
-# dlhl
+# Deadlock Highlights
 
-Finds the fights in a Deadlock VOD and cuts the best ones as clips. It reads the game clock on screen with a vision model on an OpenAI-compatible server and takes the kills, deaths and objectives of each match from [deadlock-api.com](https://deadlock-api.com).
+Finds the fights in a Deadlock VOD and cuts the best ones as clips. It reads the game clock on screen with a vision model on an OpenAI-compatible server and takes the kills, deaths and objectives of each match from [deadlock-api.com](https://deadlock-api.com). The command is `dlhl`.
 
 ## Usage
 
-dlhl needs Rust 1.98 or newer, `ffmpeg` and `ffprobe` on `PATH`, and an OpenAI-compatible chat server with a vision model. The measured setup is [Ollama](https://ollama.com) with `gemma4:e4b`:
+Deadlock Highlights needs Rust 1.98 or newer, `ffmpeg` and `ffprobe` on `PATH`, and an OpenAI-compatible chat server with a vision model. The measured setup is [Ollama](https://ollama.com) with `gemma4:e4b`:
 
 ```sh
 ollama serve    # in another terminal, unless the Ollama app is running
