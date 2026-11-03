@@ -307,7 +307,7 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use crate::hud::reader::{Outcome, ReadError, ReaderIdentity};
-    use crate::test_support::{FakeApi, match_info_json, path, player};
+    use crate::test_support::{FakeApi, have_ffmpeg, match_info_json, path, player};
     use serde_json::{Value, json};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -788,17 +788,6 @@ mod tests {
             .map(|p| p.split([' ', '(']).next().unwrap())
             .collect();
         assert_eq!(kinds, ["Probed", "History", "Aligned", "Match"], "{seen:?}");
-    }
-
-    fn have_ffmpeg() -> bool {
-        let ok = std::process::Command::new("ffmpeg")
-            .arg("-version")
-            .output()
-            .is_ok_and(|o| o.status.success());
-        if !ok {
-            eprintln!("skipping: ffmpeg not on PATH");
-        }
-        ok
     }
 
     #[test]
