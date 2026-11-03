@@ -49,7 +49,7 @@ pub struct Alignment {
     /// Unix seconds of VOD time 0.
     pub offset: i64,
     pub anchor: Option<AnchorSource>,
-    /// Game starts that fall in some history match at this offset.
+    /// Game starts within 60 s of a history match's start at this offset.
     pub hits: usize,
     pub start_count: usize,
 }

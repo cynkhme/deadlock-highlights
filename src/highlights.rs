@@ -127,7 +127,7 @@ pub(crate) fn windows(
                 .max(first - MAX_LEAD_S)
                 .max(0.0);
             let mut end = last.max(last_c) + TAIL_S;
-            // The fight that ends the match runs to its last second (the patron's fall).
+            // The fight that ends the match runs to 5 s after its last second (the patron's fall).
             if let Some(m) = match_end.filter(|&m| m >= last && m - end <= GAP_S) {
                 end = end.max((m + TAIL_S).min(last + MAX_TAIL_S + TAIL_S));
             }
@@ -459,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn match_end_ignored_when_streamer_left() {
+    fn without_a_match_end_the_window_ends_with_the_fight() {
         assert_eq!(one(&secs(101, 108), None).end, 113.0);
     }
 

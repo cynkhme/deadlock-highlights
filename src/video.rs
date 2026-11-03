@@ -9,7 +9,6 @@ use crate::hud::profile::{BAND_H, BAND_W, FRAME_H, Profile};
 
 /// One keyframe per this many seconds of VOD is gated and read, s.
 pub(crate) const GRID_S: u32 = 30;
-/// Frames are scaled to this height before the band is cut, px.
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Probe {

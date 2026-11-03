@@ -22,7 +22,7 @@ Each read sends `temperature: 0`, `max_tokens: 64` and `reasoning_effort: "none"
 Results go to `<VOD>.dlhl/`, or to `--out`:
 
 - `highlights.json`: every match with its status, the game starts that matched no match, and every window, best first. It is removed when a run starts and written when the run completes.
-- `clips/<match id>-<VOD second>.<ext>`: windows with a score of at least `--clips-min-score` (default 3: two own kills, or an own kill and an assist), stream-copied. `--clips-max` caps the count. A clip that already exists is kept; one that ffmpeg cannot cut is left out with a warning. dlhl never deletes clips.
+- `clips/<match id>-<VOD second>.<ext>`: windows with a score of at least `--clips-min-score` (default 3: for example an own kill and an assist, or three assists), stream-copied. `--clips-max` caps the count. A clip that already exists is kept; one that ffmpeg cannot cut is left out with a warning. dlhl never deletes clips.
 - `readings/`: clock readings per VOD and settings, so a rerun skips the model and needs no server. A read without any clock is not kept. It may be deleted.
 - `matches/`: match metadata from deadlock-api.com, so a rerun does not request it again.
 - `history.json`: the account's match history from this run.
@@ -33,7 +33,7 @@ Exit codes: 0 when some match was placed; 3 when none was (the reasons are in `h
 
 ## Windows
 
-A window holds events at most 12 s apart: kills near the streamer and objectives. It starts 10 s before its first event and ends 5 s after its last. While the streamer stays in combat, the start moves up to 20 s before the first event, and the end follows the fight to 5 s after its last combat second, at most 35 s after the last event. A fight that ends the match runs to the match's last second, within the same limit. A window scores 2 per own kill and 1 per assist; other events score 0. Windows are listed best first: by score, then by seconds in combat, then earlier.
+A window holds events at most 12 s apart: kills near the streamer and objectives. It starts 10 s before its first event and ends 5 s after its last. While the streamer stays in combat, the start moves up to 20 s before the first event, and the end follows the fight to 5 s after its last combat second, at most 35 s after the last event. A fight that ends the match runs to 5 s after the match's last second, within the same limit. A window scores 2 per own kill and 1 per assist; other events score 0. Windows are listed best first: by score, then by seconds in combat, then earlier.
 
 ## HUD profile
 

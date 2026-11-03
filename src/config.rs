@@ -36,7 +36,8 @@ pub struct Config {
 impl Config {
     /// Concurrent reader requests unless set otherwise.
     pub const DEFAULT_PARALLEL: u16 = 1;
-    /// The clip threshold unless set otherwise: two own kills, or an own kill and an assist.
+    /// The clip threshold unless set otherwise: for example an own kill and an assist, or three
+    /// assists.
     pub const DEFAULT_CLIPS_MIN_SCORE: u32 =
         crate::highlights::OWN_KILL_POINTS + crate::highlights::ASSIST_POINTS;
 
@@ -203,7 +204,7 @@ mod tests {
         assert_eq!(c.account, 7);
         assert_eq!(c.parallel, Config::DEFAULT_PARALLEL);
         assert_eq!(c.clips_min_score, Config::DEFAULT_CLIPS_MIN_SCORE);
-        // The README states this value as two own kills, or an own kill and an assist.
+        // The README states this value as an own kill and an assist, or three assists.
         assert_eq!(Config::DEFAULT_CLIPS_MIN_SCORE, 3);
         assert_eq!(
             (c.server.as_str(), c.model.as_str()),
