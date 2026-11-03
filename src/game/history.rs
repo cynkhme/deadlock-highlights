@@ -1,7 +1,5 @@
 //! The account's match history, and the VOD's wall-clock anchor if one is known.
 
-use std::path::Path;
-
 use deadlock_api::AccountId;
 use deadlock_api::blocking::Client;
 use serde::Serialize;
@@ -9,11 +7,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::timeline::align::{ANCHOR_WINDOW_S, HistoryMatch};
-use crate::video::Probe;
-
-/// An info.json whose duration differs from the VOD's by more than this describes
-/// another file, such as the whole VOD of a section download.
-const INFO_JSON_DURATION_TOLERANCE_S: f64 = 10.0;
+use crate::video::{self, Probe};
 
 /// Where the VOD's wall-clock start came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -73,10 +67,9 @@ pub(crate) fn load_history(
             })
         })
         .collect();
-    let anchor = cfg
-        .vod_start
-        .map(|v| (v, AnchorSource::Flag))
-        .or_else(|| info_json_start(&cfg.vod, probe, warn).map(|v| (v, AnchorSource::InfoJson)));
+    let anchor = cfg.vod_start.map(|v| (v, AnchorSource::Flag)).or_else(|| {
+        video::info_json_start(&cfg.vod, probe, warn).map(|v| (v, AnchorSource::InfoJson))
+    });
     if let Some((a, _)) = anchor {
         let span = probe.duration_s.round() as i64;
         let overlaps = matches.iter().any(|m| {
@@ -90,23 +83,6 @@ pub(crate) fn load_history(
         }
     }
     Ok(History { matches, anchor })
-}
-
-/// The `timestamp` of `<vod stem>.info.json`; a missing or unparsable file is no anchor.
-fn info_json_start(vod: &Path, probe: &Probe, warn: &dyn Fn(String)) -> Option<i64> {
-    let file = vod.with_file_name(format!("{}.info.json", vod.file_stem()?.to_string_lossy()));
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).ok()?).ok()?;
-    let timestamp = v.get("timestamp")?.as_i64()?;
-    let duration = v.get("duration")?.as_f64()?;
-    if (duration - probe.duration_s).abs() > INFO_JSON_DURATION_TOLERANCE_S {
-        warn(format!(
-            "ignoring {}: its duration {duration} s differs from the VOD's {} s (a section download?)",
-            file.display(),
-            probe.duration_s
-        ));
-        return None;
-    }
-    Some(timestamp)
 }
 
 #[cfg(test)]

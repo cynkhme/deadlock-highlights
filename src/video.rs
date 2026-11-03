@@ -1,4 +1,5 @@
-//! ffmpeg and ffprobe: probe, the keyframe band pass, and stream-copied clips.
+//! ffmpeg and ffprobe: probe, the keyframe band pass, and stream-copied clips; and yt-dlp's
+//! info.json beside the VOD.
 
 use std::path::Path;
 use std::process::Command;
@@ -93,6 +94,27 @@ pub(crate) fn probe(vod: &Path) -> Result<Probe> {
         size: meta.len(),
         mtime,
     })
+}
+
+/// An info.json whose duration differs from the VOD's by more than this describes
+/// another file, such as the whole VOD of a section download.
+const INFO_JSON_DURATION_TOLERANCE_S: f64 = 10.0;
+
+/// The `timestamp` of `<vod stem>.info.json`; a missing or unparsable file is no anchor.
+pub(crate) fn info_json_start(vod: &Path, probe: &Probe, warn: &dyn Fn(String)) -> Option<i64> {
+    let file = vod.with_file_name(format!("{}.info.json", vod.file_stem()?.to_string_lossy()));
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).ok()?).ok()?;
+    let timestamp = v.get("timestamp")?.as_i64()?;
+    let duration = v.get("duration")?.as_f64()?;
+    if (duration - probe.duration_s).abs() > INFO_JSON_DURATION_TOLERANCE_S {
+        warn(format!(
+            "ignoring {}: its duration {duration} s differs from the VOD's {} s (a section download?)",
+            file.display(),
+            probe.duration_s
+        ));
+        return None;
+    }
+    Some(timestamp)
 }
 
 /// The frame width at height 1080 (even, as the scaler needs), and the band's top-left there.
