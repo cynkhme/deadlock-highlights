@@ -161,25 +161,25 @@ fn place_matches(
         };
         match fetcher.fetch(h, is_cached(&cfg.out, *id)) {
             Fetched::Status(s) => m.status = s,
-            Fetched::Ready(t) => {
+            Fetched::Ready { timing, events } => {
                 let readings: Vec<ClockReading> = starts
                     .iter()
                     .flat_map(|s| s.readings.iter().copied())
                     .collect();
-                m.vod_start = vod_start(&readings, &t.pauses);
-                if !t.events.has_paths {
+                m.vod_start = vod_start(&readings, &timing.pauses);
+                if !events.has_paths {
                     m.degraded.push(Degraded::NoPaths);
                 }
                 let vod_s: Vec<i64> = starts.iter().map(|s| s.vod_s).collect();
-                if let Some((gaps_s, pauses_s)) = pause_mismatch(&vod_s, &t.pauses) {
+                if let Some((gaps_s, pauses_s)) = pause_mismatch(&vod_s, &timing.pauses) {
                     m.degraded
                         .push(Degraded::PauseMismatch { gaps_s, pauses_s });
                 }
                 if let Some(v) = m.vod_start {
-                    let events = vod_events(&t.events, v, &t.pauses, t.duration_s);
-                    let combat = vod_combat(&t.events, v, &t.pauses, t.duration_s);
-                    let end = match_end(&t.events, v, &t.pauses, t.duration_s);
-                    highlights.extend(windows(*id, &events, &combat, end, vod_duration));
+                    let on_vod = vod_events(&events, v, &timing.pauses, timing.duration_s);
+                    let combat = vod_combat(&events, v, &timing.pauses, timing.duration_s);
+                    let end = match_end(&events, v, &timing.pauses, timing.duration_s);
+                    highlights.extend(windows(*id, &on_vod, &combat, end, vod_duration));
                 }
             }
         }

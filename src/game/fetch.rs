@@ -22,7 +22,10 @@ const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 pub(crate) enum Fetched {
-    Ready(Box<MatchTiming>),
+    Ready {
+        timing: MatchTiming,
+        events: MatchEvents,
+    },
     Status(MatchStatus),
 }
 
@@ -30,7 +33,6 @@ pub(crate) enum Fetched {
 pub(crate) struct MatchTiming {
     pub duration_s: f64,
     pub pauses: Vec<Pause>,
-    pub events: MatchEvents,
 }
 
 /// Whether the match's metadata is in the crate's file cache under `out`.
@@ -97,20 +99,22 @@ impl<'a> Fetcher<'a> {
             return Fetched::Status(MatchStatus::NotYours);
         };
         let names = self.names(&info);
-        Fetched::Ready(Box::new(MatchTiming {
-            duration_s: f64::from(info.duration_s),
-            pauses: info
-                .match_pauses
-                .iter()
-                .filter_map(|p| {
-                    Some(Pause {
-                        game_time_s: f64::from(p.game_time_s?),
-                        duration_s: f64::from(p.pause_duration_s?),
+        Fetched::Ready {
+            timing: MatchTiming {
+                duration_s: f64::from(info.duration_s),
+                pauses: info
+                    .match_pauses
+                    .iter()
+                    .filter_map(|p| {
+                        Some(Pause {
+                            game_time_s: f64::from(p.game_time_s?),
+                            duration_s: f64::from(p.pause_duration_s?),
+                        })
                     })
-                })
-                .collect(),
+                    .collect(),
+            },
             events: events(&info, me, &names),
-        }))
+        }
     }
 
     fn failed(&mut self, id: u64, e: &ApiError) -> MatchStatus {
@@ -242,21 +246,22 @@ mod tests {
         let (d, api, client) = setup();
         api.push("/v1/matches/1/metadata", 200, &metadata(7, true), None);
         names_ok(&api);
-        let Fetched::Ready(t) = Fetcher::new(&client, 7).fetch(&hist(1, 1800, Some(1)), false)
+        let Fetched::Ready { timing, events } =
+            Fetcher::new(&client, 7).fetch(&hist(1, 1800, Some(1)), false)
         else {
             panic!("not ready")
         };
-        assert!((t.duration_s - 1800.0).abs() < 1e-9);
+        assert!((timing.duration_s - 1800.0).abs() < 1e-9);
         assert_eq!(
-            t.pauses,
+            timing.pauses,
             [Pause {
                 game_time_s: 50.0,
                 duration_s: 20.0
             }]
         );
-        assert!(t.events.has_paths);
-        assert_eq!(t.events.kills[0].victim, "Me");
-        assert_eq!(t.events.kills[0].killer, "Foe");
+        assert!(events.has_paths);
+        assert_eq!(events.kills[0].victim, "Me");
+        assert_eq!(events.kills[0].killer, "Foe");
         assert!(is_cached(d.path(), 1));
         assert!(!is_cached(d.path(), 2));
     }
@@ -323,7 +328,7 @@ mod tests {
         }
         assert!(matches!(
             f.fetch(&hist(4, 1800, Some(1)), is_cached(d.path(), 4)),
-            Fetched::Ready(_)
+            Fetched::Ready { .. }
         ));
         assert_eq!(api.requests(), ["/v1/matches/1/metadata"]);
     }
@@ -366,12 +371,13 @@ mod tests {
         let (_d, api, client) = setup();
         api.push("/v1/matches/1/metadata", 200, &metadata(7, true), None);
         api.push("/v1/players/steam", 500, "{}", None);
-        let Fetched::Ready(t) = Fetcher::new(&client, 7).fetch(&hist(1, 1800, Some(1)), false)
+        let Fetched::Ready { events, .. } =
+            Fetcher::new(&client, 7).fetch(&hist(1, 1800, Some(1)), false)
         else {
             panic!("not ready")
         };
-        assert_eq!(t.events.kills[0].victim, "7");
-        assert_eq!(t.events.kills[0].killer, "8");
+        assert_eq!(events.kills[0].victim, "7");
+        assert_eq!(events.kills[0].killer, "8");
     }
 
     #[test]
@@ -379,10 +385,11 @@ mod tests {
         let (_d, api, client) = setup();
         api.push("/v1/matches/1/metadata", 200, &metadata(7, false), None);
         names_ok(&api);
-        let Fetched::Ready(t) = Fetcher::new(&client, 7).fetch(&hist(1, 1800, Some(1)), false)
+        let Fetched::Ready { events, .. } =
+            Fetcher::new(&client, 7).fetch(&hist(1, 1800, Some(1)), false)
         else {
             panic!("not ready")
         };
-        assert!(!t.events.has_paths);
+        assert!(!events.has_paths);
     }
 }
