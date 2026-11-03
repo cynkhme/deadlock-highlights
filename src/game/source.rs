@@ -72,5 +72,9 @@ mod tests {
             skip_status(&hist(1, 1800, Some(4))),
             Some(MatchStatus::UnsupportedMode { game_mode: Some(4) })
         );
+        assert_eq!(
+            skip_status(&hist(1, 1800, None)),
+            Some(MatchStatus::UnsupportedMode { game_mode: None })
+        );
     }
 }
