@@ -1,11 +1,10 @@
-//! The account's match history, and the VOD's wall-clock anchor if one is known.
+//! The account's match history from a source, and the VOD's wall-clock anchor if one is known.
 
-use deadlock_api::AccountId;
-use deadlock_api::blocking::Client;
 use serde::Serialize;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::game::source::MatchSource;
 use crate::timeline::align::{ANCHOR_WINDOW_S, HistoryMatch};
 use crate::video::{self, Probe};
 
@@ -27,46 +26,16 @@ pub(crate) struct History {
     pub anchor: Option<(i64, AnchorSource)>,
 }
 
-/// Requests the account's match history once and writes it to `<out>/history.json`.
+/// The account's matches from `source`, and the VOD's anchor if one is known; an anchor
+/// no match overlaps is an error.
 pub(crate) fn load_history(
-    api: &Client,
+    source: &mut dyn MatchSource,
     cfg: &Config,
     probe: &Probe,
     warn: &dyn Fn(String),
 ) -> Result<History> {
     let n = cfg.account;
-    let entries = api
-        .match_history(AccountId(n))
-        .map_err(|e| Error::History(format!("match history for account {n}: {e}")))?;
-    let file = cfg.out.join("history.json");
-    let io = |source| Error::Io {
-        path: file.clone(),
-        source,
-    };
-    std::fs::create_dir_all(&cfg.out).map_err(|source| Error::Io {
-        path: cfg.out.clone(),
-        source,
-    })?;
-    std::fs::write(
-        &file,
-        serde_json::to_vec(&entries).expect("history entries serialise"),
-    )
-    .map_err(io)?;
-    if entries.is_empty() {
-        return Err(Error::History(format!("account {n} has no match history")));
-    }
-    // An entry without a start cannot be placed on the wall clock.
-    let matches: Vec<HistoryMatch> = entries
-        .iter()
-        .filter_map(|e| {
-            Some(HistoryMatch {
-                match_id: e.match_id.0,
-                start_time: i64::try_from(e.start_time?).ok()?,
-                duration_s: e.match_duration_s.unwrap_or(0),
-                game_mode: e.game_mode,
-            })
-        })
-        .collect();
+    let matches = source.history()?;
     let anchor = cfg.vod_start.map(|v| (v, AnchorSource::Flag)).or_else(|| {
         video::info_json_start(&cfg.vod, probe, warn).map(|v| (v, AnchorSource::InfoJson))
     });
@@ -88,6 +57,7 @@ pub(crate) fn load_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::source::api::ApiSource;
     use crate::test_support::FakeApi;
     use std::cell::RefCell;
 
@@ -125,74 +95,10 @@ mod tests {
         probe: &Probe,
         api: &std::sync::Arc<FakeApi>,
     ) -> (Result<History>, Vec<String>) {
-        let client = crate::game::api::client(cfg, Some(Box::new(api.clone()))).unwrap();
+        let mut src = ApiSource::new(cfg, Some(Box::new(api.clone()))).unwrap();
         let warnings = RefCell::new(Vec::new());
-        let r = load_history(&client, cfg, probe, &|w| warnings.borrow_mut().push(w));
+        let r = load_history(&mut src, cfg, probe, &|w| warnings.borrow_mut().push(w));
         (r, warnings.into_inner())
-    }
-
-    #[test]
-    fn history_written_and_parsed() {
-        let body = serde_json::json!([
-            entry(2, Some(A + 100), Some(1800)),
-            entry(3, None, Some(5)),
-            entry(4, Some(A), None)
-        ]);
-        let (d, cfg, probe, api) = setup(&body, None);
-        let (h, w) = run(&cfg, &probe, &api);
-        let h = h.unwrap();
-        assert_eq!(w, Vec::<String>::new());
-        assert_eq!(h.anchor, None);
-        let got: Vec<(u64, i64, u32)> = h
-            .matches
-            .iter()
-            .map(|m| (m.match_id, m.start_time, m.duration_s))
-            .collect();
-        assert_eq!(got, [(2, A + 100, 1800), (4, A, 0)]);
-        let written: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(d.path().join("stream.mp4.dlhl/history.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(written.as_array().unwrap().len(), 3);
-        assert_eq!(api.requests(), ["/v1/players/7/match-history"]);
-    }
-
-    #[test]
-    fn history_empty_is_error() {
-        let (_d, cfg, probe, api) = setup(&serde_json::json!([]), None);
-        let e = run(&cfg, &probe, &api).0.unwrap_err();
-        assert_eq!(
-            e.to_string(),
-            Error::History("account 7 has no match history".into()).to_string()
-        );
-    }
-
-    #[test]
-    fn history_500_is_error() {
-        let (_d, cfg, probe, _) = setup(&serde_json::json!([]), None);
-        let api = FakeApi::with(&[("/v1/players/7/match-history", &[(500, "{}")])]);
-        let e = run(&cfg, &probe, &api).0.unwrap_err();
-        assert!(
-            matches!(&e, Error::History(m) if m.starts_with("match history for account 7: ")),
-            "{e}"
-        );
-        // The crate retries a 503 or a 429, not a 500.
-        assert_eq!(api.requests().len(), 1);
-    }
-
-    #[test]
-    fn history_503_retried_three_times_then_error() {
-        let (_d, cfg, probe, _) = setup(&serde_json::json!([]), None);
-        let api = FakeApi::with(&[(
-            "/v1/players/7/match-history",
-            &[(503, "{}"), (503, "{}"), (503, "{}")],
-        )]);
-        let e = run(&cfg, &probe, &api).0.unwrap_err();
-        assert!(
-            matches!(&e, Error::History(m) if m.starts_with("match history for account 7: ")),
-            "{e}"
-        );
-        assert_eq!(api.requests().len(), 3);
     }
 
     fn info_json(cfg: &Config, timestamp: i64, duration: f64) {
@@ -291,13 +197,6 @@ mod tests {
             );
             assert!(run(&cfg, &probe, &api).0.is_ok(), "start {start}");
         }
-    }
-
-    #[test]
-    fn history_of_startless_entries_is_not_empty() {
-        let (_d, cfg, probe, api) = setup(&serde_json::json!([entry(3, None, Some(5))]), None);
-        let h = run(&cfg, &probe, &api).0.unwrap();
-        assert_eq!(h.matches, Vec::new());
     }
 
     #[test]

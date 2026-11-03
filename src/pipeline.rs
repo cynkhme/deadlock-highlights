@@ -3,12 +3,11 @@
 
 use std::path::PathBuf;
 
-use deadlock_api::blocking::{Client, Transport};
-
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::game::fetch::{Fetched, Fetcher, is_cached, skip_status};
 use crate::game::history::{History, load_history};
+use crate::game::source::api::ApiSource;
+use crate::game::source::{Fetched, MatchSource, skip_status};
 use crate::highlights::{match_end, rank, vod_combat, vod_events, windows};
 use crate::hud::cache;
 use crate::hud::clock::ClockReading;
@@ -32,18 +31,15 @@ fn notify(cfg: &Config, p: Progress) {
 
 /// Every stage after the probe.
 pub(crate) fn run(cfg: &Config, reader: &dyn HudReader, probe: &Probe) -> Result<Output> {
-    let (api, history) = prepare(cfg, probe, None)?;
+    begin(cfg, probe)?;
+    let mut source = ApiSource::new(cfg, None)?;
+    let history = prepare(cfg, probe, &mut source)?;
     let frames = read_vod(cfg, probe, reader)?;
-    place(cfg, &api, probe, history, &frames)
+    place(cfg, &mut source, probe, history, &frames)
 }
 
-/// The output directory, the API client and the match history; `transport` replaces the
-/// network in tests.
-fn prepare(
-    cfg: &Config,
-    probe: &Probe,
-    transport: Option<Box<dyn Transport>>,
-) -> Result<(Client, History)> {
+/// Reports the probe and creates the output directory.
+fn begin(cfg: &Config, probe: &Probe) -> Result<()> {
     notify(
         cfg,
         Progress::Probed {
@@ -53,9 +49,12 @@ fn prepare(
     std::fs::create_dir_all(&cfg.out).map_err(|source| Error::Io {
         path: cfg.out.clone(),
         source,
-    })?;
-    let api = crate::game::api::client(cfg, transport)?;
-    let history = load_history(&api, cfg, probe, &|w| notify(cfg, Progress::Warning(w)))?;
+    })
+}
+
+/// The match history from `source`, reported once loaded.
+fn prepare(cfg: &Config, probe: &Probe, source: &mut dyn MatchSource) -> Result<History> {
+    let history = load_history(source, cfg, probe, &|w| notify(cfg, Progress::Warning(w)))?;
     notify(
         cfg,
         Progress::History {
@@ -63,14 +62,14 @@ fn prepare(
             anchor: history.anchor.map(|a| a.1),
         },
     );
-    Ok((api, history))
+    Ok(history)
 }
 
 /// Everything placed from the readings: alignment, each match's place and windows, and
 /// the clips.
 fn place(
     cfg: &Config,
-    api: &Client,
+    source: &mut dyn MatchSource,
     probe: &Probe,
     history: History,
     frames: &[FrameReading],
@@ -102,7 +101,7 @@ fn place(
         }
     }
 
-    let (matches, mut highlights) = place_matches(cfg, api, &hist, &groups, probe.duration_s);
+    let (matches, mut highlights) = place_matches(cfg, source, &hist, &groups, probe.duration_s);
     rank(&mut highlights);
 
     let unseen = unseen(&hist, &groups, offset, probe.duration_s);
@@ -139,12 +138,11 @@ fn place(
 /// Fetches and places each assigned match once, in VOD order; returns its reports and windows.
 fn place_matches(
     cfg: &Config,
-    api: &Client,
+    source: &mut dyn MatchSource,
     hist: &[HistoryMatch],
     groups: &[(u64, Vec<&GameStart>)],
     vod_duration: f64,
 ) -> (Vec<MatchReport>, Vec<Highlight>) {
-    let mut fetcher = Fetcher::new(api, cfg.account);
     let mut matches = Vec::new();
     let mut highlights = Vec::new();
     for (id, starts) in groups {
@@ -159,27 +157,31 @@ fn place_matches(
             status: MatchStatus::Placed,
             degraded: Vec::new(),
         };
-        match fetcher.fetch(h, is_cached(&cfg.out, *id)) {
-            Fetched::Status(s) => m.status = s,
-            Fetched::Ready { timing, events } => {
-                let readings: Vec<ClockReading> = starts
-                    .iter()
-                    .flat_map(|s| s.readings.iter().copied())
-                    .collect();
-                m.vod_start = vod_start(&readings, &timing.pauses);
-                if !events.has_paths {
-                    m.degraded.push(Degraded::NoPaths);
-                }
-                let vod_s: Vec<i64> = starts.iter().map(|s| s.vod_s).collect();
-                if let Some((gaps_s, pauses_s)) = pause_mismatch(&vod_s, &timing.pauses) {
-                    m.degraded
-                        .push(Degraded::PauseMismatch { gaps_s, pauses_s });
-                }
-                if let Some(v) = m.vod_start {
-                    let on_vod = vod_events(&events, v, &timing.pauses, timing.duration_s);
-                    let combat = vod_combat(&events, v, &timing.pauses, timing.duration_s);
-                    let end = match_end(&events, v, &timing.pauses, timing.duration_s);
-                    highlights.extend(windows(*id, &on_vod, &combat, end, vod_duration));
+        if let Some(s) = skip_status(h) {
+            m.status = s;
+        } else {
+            match source.fetch(h) {
+                Fetched::Status(s) => m.status = s,
+                Fetched::Ready { timing, events } => {
+                    let readings: Vec<ClockReading> = starts
+                        .iter()
+                        .flat_map(|s| s.readings.iter().copied())
+                        .collect();
+                    m.vod_start = vod_start(&readings, &timing.pauses);
+                    if !events.has_paths {
+                        m.degraded.push(Degraded::NoPaths);
+                    }
+                    let vod_s: Vec<i64> = starts.iter().map(|s| s.vod_s).collect();
+                    if let Some((gaps_s, pauses_s)) = pause_mismatch(&vod_s, &timing.pauses) {
+                        m.degraded
+                            .push(Degraded::PauseMismatch { gaps_s, pauses_s });
+                    }
+                    if let Some(v) = m.vod_start {
+                        let on_vod = vod_events(&events, v, &timing.pauses, timing.duration_s);
+                        let combat = vod_combat(&events, v, &timing.pauses, timing.duration_s);
+                        let end = match_end(&events, v, &timing.pauses, timing.duration_s);
+                        highlights.extend(windows(*id, &on_vod, &combat, end, vod_duration));
+                    }
                 }
             }
         }
@@ -390,8 +392,10 @@ mod tests {
 
     /// The run after the read, on `readings` in place of the VOD's.
     fn run_on(f: &Fixture, probe: &Probe, readings: &[FrameReading]) -> Result<Output> {
-        let (api, history) = prepare(&f.cfg, probe, Some(Box::new(f.api.clone())))?;
-        place(&f.cfg, &api, probe, history, readings)
+        begin(&f.cfg, probe)?;
+        let mut source = ApiSource::new(&f.cfg, Some(Box::new(f.api.clone())))?;
+        let history = prepare(&f.cfg, probe, &mut source)?;
+        place(&f.cfg, &mut source, probe, history, readings)
     }
 
     #[test]
@@ -613,6 +617,38 @@ mod tests {
                 .iter()
                 .any(|p| p.starts_with("/v1/matches/"))
         );
+    }
+
+    #[test]
+    fn bad_api_key_fails_after_probed() {
+        let mut f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
+        f.cfg.deadlock_api_key = Some("bad\nkey".into());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let s = seen.clone();
+        f.cfg.progress = Some(Arc::new(move |p| s.lock().unwrap().push(format!("{p:?}"))));
+        let reader = Refused::default();
+        let e = super::run(&f.cfg, &reader, &probe(3600.0)).unwrap_err();
+        assert!(matches!(e, Error::Usage(_)), "{e:?}");
+        let kinds: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|p| p.split([' ', '(']).next().unwrap().to_owned())
+            .collect();
+        assert_eq!(kinds, ["Probed"]);
+    }
+
+    #[test]
+    fn history_failure_contacts_no_model_server() {
+        let d = tempfile::tempdir().unwrap();
+        let mut cfg = Config::new(d.path().join("v.mp4"), 7, "http://127.0.0.1:9/v1", "m");
+        cfg.out = d.path().join("out");
+        // Nothing listens on port 9, so the history request fails.
+        cfg.deadlock_api_url = "http://127.0.0.1:9".into();
+        let reader = Refused::default();
+        let e = super::run(&cfg, &reader, &probe(3600.0)).unwrap_err();
+        assert!(matches!(e, Error::History(_)), "{e:?}");
+        assert_eq!(reader.0.load(Ordering::SeqCst), 0);
     }
 
     #[test]
