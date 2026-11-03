@@ -178,9 +178,10 @@ fn place_matches(
                             .push(Degraded::PauseMismatch { gaps_s, pauses_s });
                     }
                     if let Some(v) = m.vod_start {
-                        let on_vod = vod_events(&events, v, &timing.pauses, timing.duration_s);
-                        let combat = vod_combat(&events, v, &timing.pauses, timing.duration_s);
-                        let end = match_end(&events, v, &timing.pauses, timing.duration_s);
+                        let (p, d) = (&timing.pauses, timing.duration_s);
+                        let on_vod = vod_events(&events, v, p, d, vod_duration);
+                        let combat = vod_combat(&events, v, p, d, vod_duration);
+                        let end = match_end(&events, v, p, d);
                         highlights.extend(windows(*id, &on_vod, &combat, end, vod_duration));
                     }
                 }
@@ -431,6 +432,19 @@ mod tests {
             "end {}",
             o.highlights[0].end
         );
+    }
+
+    #[test]
+    fn events_after_the_vod_end_make_no_window() {
+        // The VOD ends at 400, mid-match: the kill at game 300 = VOD 350 is on it; the kills
+        // at game 500 and 505 = VOD 550 and 555, and the combat after them, are not.
+        let f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
+        let mut combat = vec![0; 1801];
+        combat[500..=510].fill(1);
+        cache_match_combat(&f, 1, 7, true, &[300, 500, 505], &combat);
+        let o = run(&f, 400.0, &cluster(50.0, 10, 3)).unwrap();
+        let spans: Vec<(f64, f64)> = o.highlights.iter().map(|h| (h.start, h.end)).collect();
+        assert_eq!(spans, [(340.0, 355.0)]);
     }
 
     #[test]

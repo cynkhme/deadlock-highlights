@@ -19,12 +19,14 @@ pub(crate) const OWN_KILL_POINTS: u32 = 2;
 pub(crate) const ASSIST_POINTS: u32 = 1;
 
 /// The match's scoring events on the VOD, in VOD order: kills near the streamer and
-/// objectives, up to the end of the streamer's stream of the match.
+/// objectives, up to the end of the streamer's stream of the match and inside the VOD's
+/// `vod_duration`.
 pub(crate) fn vod_events(
     ev: &MatchEvents,
     vod_start: f64,
     pauses: &[Pause],
     duration_s: f64,
+    vod_duration: f64,
 ) -> Vec<Event> {
     let stream_end = ev.left_at.unwrap_or(duration_s);
     let at = |game_time: f64| vod_start + elapsed(game_time, pauses);
@@ -52,26 +54,27 @@ pub(crate) fn vod_events(
     });
     let mut events: Vec<Event> = kills
         .chain(objectives)
-        .filter(|e| e.game_time <= stream_end && e.vod_time >= 0.0)
+        .filter(|e| e.game_time <= stream_end && (0.0..=vod_duration).contains(&e.vod_time))
         .collect();
     events.sort_by(|a, b| a.vod_time.total_cmp(&b.vod_time));
     events
 }
 
 /// The streamer's combat seconds on the VOD, ascending, up to the end of the streamer's stream
-/// of the match.
+/// of the match and inside the VOD's `vod_duration`.
 pub(crate) fn vod_combat(
     ev: &MatchEvents,
     vod_start: f64,
     pauses: &[Pause],
     duration_s: f64,
+    vod_duration: f64,
 ) -> Vec<f64> {
     let stream_end = ev.left_at.unwrap_or(duration_s);
     ev.combat
         .iter()
         .filter(|&&t| t <= stream_end)
         .map(|&t| vod_start + elapsed(t, pauses))
-        .filter(|&v| v >= 0.0)
+        .filter(|v| (0.0..=vod_duration).contains(v))
         .collect()
 }
 
@@ -272,7 +275,7 @@ mod tests {
             has_paths: true,
             combat: Vec::new(),
         };
-        let t = vod_events(&m, 1000.0, &[], 2000.0);
+        let t = vod_events(&m, 1000.0, &[], 2000.0, 1e4);
         let got: Vec<(f64, bool, &str)> = t
             .iter()
             .map(|e| (e.vod_time, e.objective, e.label.as_str()))
@@ -299,7 +302,7 @@ mod tests {
             game_time_s: 600.0,
             duration_s: 30.0,
         }];
-        let t = vod_events(&m, -20.0, &pauses, 2000.0);
+        let t = vod_events(&m, -20.0, &pauses, 2000.0, 1e4);
         assert_eq!(
             t.iter()
                 .map(|e| (e.vod_time, e.game_time))
@@ -321,7 +324,7 @@ mod tests {
             has_paths: true,
             combat: Vec::new(),
         };
-        let t = vod_events(&m, 0.0, &[], 2000.0);
+        let t = vod_events(&m, 0.0, &[], 2000.0, 1e4);
         assert_eq!(
             t.iter().map(|e| e.game_time).collect::<Vec<_>>(),
             [10.0, 500.0]
@@ -337,7 +340,7 @@ mod tests {
             has_paths: true,
             combat: Vec::new(),
         };
-        assert_eq!(vod_events(&m, 0.0, &[], 2000.0).len(), 1);
+        assert_eq!(vod_events(&m, 0.0, &[], 2000.0, 1e4).len(), 1);
     }
 
     fn hl(score: u32, combat_s: u32, start: f64) -> Highlight {
@@ -388,7 +391,7 @@ mod tests {
             has_paths: true,
             combat: Vec::new(),
         };
-        let t = vod_events(&m, 0.0, &[], 2000.0);
+        let t = vod_events(&m, 0.0, &[], 2000.0, 1e4);
         assert_eq!(
             (t[0].my_health, t[0].net_worth_ratio),
             (Some(40), Some(1.2))
@@ -505,11 +508,28 @@ mod tests {
             game_time_s: 600.0,
             duration_s: 30.0,
         }];
-        let events: Vec<f64> = vod_events(&m, -20.0, &pauses, 2000.0)
+        let events: Vec<f64> = vod_events(&m, -20.0, &pauses, 2000.0, 1e4)
             .iter()
             .map(|e| e.vod_time)
             .collect();
-        assert_eq!(vod_combat(&m, -20.0, &pauses, 2000.0), events);
+        assert_eq!(vod_combat(&m, -20.0, &pauses, 2000.0, 1e4), events);
         assert_eq!(events, [710.0]);
+    }
+
+    #[test]
+    fn events_and_combat_after_the_vod_end_dropped() {
+        let m = MatchEvents {
+            kills: vec![kill(100.0, true), kill(600.0, true), kill(601.0, true)],
+            objectives: vec![],
+            left_at: None,
+            has_paths: true,
+            combat: vec![100.0, 600.0, 601.0],
+        };
+        let events: Vec<f64> = vod_events(&m, 0.0, &[], 2000.0, 600.0)
+            .iter()
+            .map(|e| e.vod_time)
+            .collect();
+        assert_eq!(events, [100.0, 600.0]);
+        assert_eq!(vod_combat(&m, 0.0, &[], 2000.0, 600.0), [100.0, 600.0]);
     }
 }
