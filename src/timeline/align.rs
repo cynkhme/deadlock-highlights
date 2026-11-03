@@ -273,15 +273,13 @@ mod tests {
             .collect()
     }
 
-    fn fixture(name: &str) -> Option<Value> {
+    /// A local fixture of the measured VOD; not in git, so its tests are ignored by default.
+    fn fixture(name: &str) -> Value {
         let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/align")
             .join(name);
-        let Ok(text) = std::fs::read_to_string(&p) else {
-            eprintln!("skipping: {} absent", p.display());
-            return None;
-        };
-        Some(serde_json::from_str(&text).unwrap())
+        let text = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        serde_json::from_str(&text).unwrap()
     }
 
     fn history_of(v: &Value) -> Vec<HistoryMatch> {
@@ -331,10 +329,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the local testdata/align; run with --include-ignored"]
     fn sweep_finds_offset_pair_rule_misses() {
-        let Some(v) = fixture("short-vod.json") else {
-            return;
-        };
+        let v = fixture("short-vod.json");
         let h = history_of(&v);
         let s = ints(&v["starts"]);
         let (off, hits) = align(&s, &h, v["anchor"].as_i64()).unwrap();
@@ -343,10 +340,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the local testdata/align; run with --include-ignored"]
     fn full_vod_aligns() {
-        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
-            return;
-        };
+        let (fx, exp) = (fixture("full-vod.json"), fixture("expected.json"));
         let h = history_of(&fx);
         let readings: Vec<ClockReading> = fx["readings"]
             .as_array()
@@ -379,10 +375,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the local testdata/align; run with --include-ignored"]
     fn full_vod_windows() {
-        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
-            return;
-        };
+        let (fx, exp) = (fixture("full-vod.json"), fixture("expected.json"));
         let h = history_of(&fx);
         let windows = exp["windows"].as_array().unwrap();
         assert_eq!(windows.len(), 189);
@@ -399,10 +394,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the local testdata/align; run with --include-ignored"]
     fn wrong_anchor_rejected() {
-        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
-            return;
-        };
+        let (fx, exp) = (fixture("full-vod.json"), fixture("expected.json"));
         let h = history_of(&fx);
         let s = ints(&exp["full"]["starts"]);
         let cases = exp["wrong_anchors"].as_array().unwrap();
@@ -414,10 +408,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the local testdata/align; run with --include-ignored"]
     fn align_cut_first_match_is_unmatched_not_wrong() {
-        let (Some(fx), Some(exp)) = (fixture("full-vod.json"), fixture("expected.json")) else {
-            return;
-        };
+        let (fx, exp) = (fixture("full-vod.json"), fixture("expected.json"));
         let h = history_of(&fx);
         let mut readings: Vec<ClockReading> = fx["readings"]
             .as_array()

@@ -869,12 +869,9 @@ mod tests {
     /// A recorded run on one VOD: clock readings, the account's match history, the
     /// metadata of its matches and the highlights found then. Not in git.
     #[test]
+    #[ignore = "needs the local testdata/recorded-run; run with --include-ignored"]
     fn recorded_run_places_12() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/recorded-run");
-        if !src.is_dir() {
-            eprintln!("skipping: {} is absent", src.display());
-            return;
-        }
         let read = |name: &str| -> Value {
             serde_json::from_str(&std::fs::read_to_string(src.join(name)).unwrap()).unwrap()
         };
