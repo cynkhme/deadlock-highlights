@@ -25,6 +25,9 @@ pub(crate) struct ApiSource {
     out: PathBuf,
     /// Set by a long rate limit.
     stopped: Option<Stopped>,
+    /// Set by a failed names request: each would wait out the crate's retries again, only
+    /// for labels.
+    names_failed: bool,
 }
 
 /// The `Retry-After` every uncached match reports once a long rate limit stopped requests.
@@ -64,6 +67,7 @@ impl ApiSource {
             account: cfg.account,
             out: cfg.out.clone(),
             stopped: None,
+            names_failed: false,
         })
     }
 
@@ -88,16 +92,19 @@ impl ApiSource {
         }
     }
 
-    /// Steam names of the match's players; without them the events name account ids.
-    fn names(&self, info: &MatchInfo) -> HashMap<AccountId, String> {
+    /// Steam names of the match's players; without them, as after any failed names request
+    /// of the run, the events name account ids.
+    fn names(&mut self, info: &MatchInfo) -> HashMap<AccountId, String> {
         // After a long rate limit the run sends nothing more.
-        if self.stopped.is_some() {
+        if self.stopped.is_some() || self.names_failed {
             return HashMap::new();
         }
         let ids: Vec<AccountId> = info.players.iter().map(|p| p.account_id).collect();
-        self.api
-            .steam_profiles(&ids)
-            .unwrap_or_default()
+        let Ok(profiles) = self.api.steam_profiles(&ids) else {
+            self.names_failed = true;
+            return HashMap::new();
+        };
+        profiles
             .into_iter()
             .filter_map(|p| Some((p.account_id, p.personaname?)))
             .collect()
@@ -367,6 +374,26 @@ mod tests {
         };
         assert_eq!(events.kills[0].victim, "7");
         assert_eq!(events.kills[0].killer, "8");
+    }
+
+    #[test]
+    fn names_are_not_requested_again_after_a_failure() {
+        let (_d, api, mut src) = setup();
+        api.push("/v1/matches/1/metadata", 200, &metadata(7, true), None);
+        api.push("/v1/players/steam", 500, "{}", None);
+        api.push("/v1/matches/2/metadata", 200, &metadata(7, true), None);
+        names_ok(&api);
+        src.fetch(&hist(1, 1800, Some(1)));
+        let Fetched::Ready { events, .. } = src.fetch(&hist(2, 1800, Some(1))) else {
+            panic!("not ready")
+        };
+        assert_eq!(events.kills[0].victim, "7");
+        let steam = api
+            .requests()
+            .iter()
+            .filter(|r| r.starts_with("/v1/players/steam"))
+            .count();
+        assert_eq!(steam, 1);
     }
 
     #[test]
