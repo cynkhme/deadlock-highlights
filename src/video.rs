@@ -270,17 +270,7 @@ pub(crate) fn cut_clip(vod: &Path, start: f64, end: f64, dest: &Path) -> Result<
 #[allow(clippy::many_single_char_names, reason = "short-lived test values")]
 mod tests {
     use super::*;
-
-    fn have_ffmpeg() -> bool {
-        let ok = Command::new("ffmpeg")
-            .arg("-version")
-            .output()
-            .is_ok_and(|o| o.status.success());
-        if !ok {
-            eprintln!("skipping: ffmpeg not on PATH");
-        }
-        ok
-    }
+    use crate::test_support::have_ffmpeg;
 
     /// A synthetic H.264 video with a keyframe every second.
     fn video(dir: &Path, name: &str, source: &str, secs: u32) -> std::path::PathBuf {

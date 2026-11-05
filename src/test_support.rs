@@ -3,6 +3,27 @@
 use deadlock_api::MatchInfo;
 use serde_json::{Value, json};
 
+/// Set where ffmpeg must be present, as in CI: a test that needs it then fails without it
+/// instead of returning early.
+const REQUIRE_FFMPEG: &str = "DLHL_REQUIRE_FFMPEG";
+
+/// Whether `ffmpeg` runs. Tests that need it return early when it does not, unless
+/// `DLHL_REQUIRE_FFMPEG` is set.
+pub(crate) fn have_ffmpeg() -> bool {
+    let ok = std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    assert!(
+        ok || std::env::var_os(REQUIRE_FFMPEG).is_none(),
+        "ffmpeg not on PATH, and {REQUIRE_FFMPEG} is set"
+    );
+    if !ok {
+        eprintln!("skipping: ffmpeg not on PATH");
+    }
+    ok
+}
+
 /// One path sample per second: x position (y = 0), health and combat type. An empty `combat`
 /// leaves the key out, as some matches do.
 pub(crate) fn path(slot: u32, xs: &[u32], health: &[u32], combat: &[u32]) -> Value {
