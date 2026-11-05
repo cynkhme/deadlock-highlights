@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Every run cuts its clips again and replaces files of the same name, so a clip whose window grew is no longer kept as first cut.
+- A VOD that starts after a match's first pause no longer marks that match's pauses as mismatched in `highlights.json`.
+- The rejected-offset hint and the no-overlap error name where the VOD's start came from, `--vod-start` or `info.json`, instead of always telling to pass `--vod-start`.
+- After one failed Steam names request, the run names account ids for the remaining matches instead of waiting out the retries again for each.
+- Readings are cached under one server name for every loopback address, so switching between `localhost` and `127.0.0.1` reads no frame again; a user name or password in `--server` is no longer written into the cache.
+
 ## 0.1.0 — 2026-11-03
 
 First release.
