@@ -1,6 +1,6 @@
 //! The clock read on every keyframe that passes the gate.
 
-pub(crate) mod openai;
+pub(crate) mod chat_completions;
 
 use std::time::Duration;
 

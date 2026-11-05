@@ -31,7 +31,7 @@ pub use output::{
 /// server, the history, no clock or game start, or an offset the history does not accept.
 pub fn run(cfg: &Config) -> Result<Output, Error> {
     // Construction checks only the key policy, so a refused key fails before ffmpeg runs.
-    let reader = hud::reader::openai::OpenAiChat::new(
+    let reader = hud::reader::chat_completions::ChatCompletions::new(
         &cfg.server,
         &cfg.model,
         cfg.server_api_key.as_deref(),
