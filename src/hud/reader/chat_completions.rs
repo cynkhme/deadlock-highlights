@@ -1,4 +1,4 @@
-//! The `OpenAI` chat-completions reader.
+//! The Chat Completions reader, for any `OpenAI`-compatible server.
 
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ use crate::hud::reader::{HudReader, ReadError, ReaderIdentity};
 pub(crate) const PROMPT: &str = "A HUD strip from the game Deadlock. It may show the game clock as minutes:seconds. Copy the clock exactly as shown. If the strip does not show it, use an empty string. Answer with JSON only: {\"clock\": \"<clock or empty>\"}.";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
-pub(crate) struct OpenAiChat {
+pub(crate) struct ChatCompletions {
     agent: ureq::Agent,
     server: String,
     model: String,
@@ -96,16 +96,16 @@ fn key_server(server: &str) -> String {
 /// A blank clock band at the size `read` is sent, for the preflight request.
 const BLANK_BAND: &[u8] = include_bytes!("blank-band.png");
 
-impl OpenAiChat {
+impl ChatCompletions {
     /// Checks the key policy; the server is first contacted by `preflight`.
-    pub(crate) fn new(server: &str, model: &str, key: Option<&str>) -> Result<OpenAiChat> {
+    pub(crate) fn new(server: &str, model: &str, key: Option<&str>) -> Result<ChatCompletions> {
         check_key_policy(server, key)?;
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(REQUEST_TIMEOUT))
             .build()
             .into();
-        let reader = OpenAiChat {
+        let reader = ChatCompletions {
             agent,
             server: server.trim_end_matches('/').to_owned(),
             model: model.to_owned(),
@@ -156,7 +156,7 @@ fn clip(s: &str) -> &str {
     &s[..end]
 }
 
-impl HudReader for OpenAiChat {
+impl HudReader for ChatCompletions {
     fn identity(&self) -> ReaderIdentity {
         ReaderIdentity {
             protocol: "openai-chat",
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn preflight_checks_the_model_then_sends_a_blank_band() {
         let (base, log) = server(vec![models(), chat("{}")]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", None).unwrap();
         assert!(log.lock().unwrap().is_empty(), "new sends nothing");
         r.preflight().unwrap();
         let log = log.lock().unwrap();
@@ -367,7 +367,7 @@ mod tests {
                 r#"{"error":"unknown field reasoning_effort"}"#.into(),
             ),
         ]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", None).unwrap();
         let e = r.preflight().unwrap_err();
         assert!(
             matches!(&e, Error::Reader(m) if m.contains("400") && m.contains("unknown field reasoning_effort")),
@@ -378,14 +378,14 @@ mod tests {
     #[test]
     fn preflight_takes_a_rate_limit() {
         let (base, _) = server(vec![models(), (429, "", String::new())]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", None).unwrap();
         r.preflight().unwrap();
     }
 
     #[test]
     fn model_not_served_is_reader_error() {
         let (base, _) = server(vec![models()]);
-        let r = OpenAiChat::new(&base, "llava", None).unwrap();
+        let r = ChatCompletions::new(&base, "llava", None).unwrap();
         let e = r.preflight().unwrap_err();
         assert!(
             matches!(&e, Error::Reader(m) if m.contains("llava") && m.contains("gemma4:e4b")),
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn unreachable_server_is_reader_error() {
-        let r = OpenAiChat::new("http://127.0.0.1:9/v1", "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new("http://127.0.0.1:9/v1", "gemma4:e4b", None).unwrap();
         let e = r.preflight().unwrap_err();
         assert!(
             matches!(&e, Error::Reader(m) if m.contains("127.0.0.1:9")),
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn request_body_shape() {
         let (base, log) = server(vec![chat(r#"{"clock":"5:17"}"#)]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", None).unwrap();
         assert_eq!(r.read(b"PNGDATA").unwrap(), r#"{"clock":"5:17"}"#);
         let req = log.lock().unwrap()[0].clone();
         assert_eq!(req.line, "POST /v1/chat/completions HTTP/1.1");
@@ -432,7 +432,12 @@ mod tests {
 
     #[test]
     fn loopback_servers_share_a_cache_key() {
-        let id = |s: &str| OpenAiChat::new(s, "m", None).unwrap().identity().server;
+        let id = |s: &str| {
+            ChatCompletions::new(s, "m", None)
+                .unwrap()
+                .identity()
+                .server
+        };
         assert_eq!(id("http://localhost:11434/v1"), "http://localhost:11434/v1");
         for same in [
             "http://127.0.0.1:11434/v1",
@@ -452,7 +457,7 @@ mod tests {
     fn fenced_and_unfenced_answers() {
         let fenced = "```json\n{\"clock\": \"5:17\"}\n```";
         let (base, _) = server(vec![chat(fenced), chat(r#"{"clock":"5:17"}"#)]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", None).unwrap();
         for _ in 0..2 {
             assert_eq!(
                 crate::hud::clock::parse_answer(&r.read(b"x").unwrap()),
@@ -462,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_prose_answer_is_kept_raw() {
+    fn prose_answer_is_kept_raw() {
         let (base, _) = server(vec![
             chat("I see 5:17"),
             (200, "", "not json".into()),
@@ -472,7 +477,7 @@ mod tests {
                 r#"{"choices":[{"message":{"content":null}}]}"#.into(),
             ),
         ]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", None).unwrap();
         assert_eq!(r.read(b"x").unwrap(), "I see 5:17");
         assert_eq!(r.read(b"x").unwrap(), "not json");
         assert_eq!(r.read(b"x").unwrap(), "");
@@ -495,7 +500,7 @@ mod tests {
                 r#"{"error":"structured output is unavailable"}"#.into(),
             ),
         ]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", None).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", None).unwrap();
         assert!(
             matches!(r.read(b"x"), Err(ReadError::Fatal(m)) if m.starts_with("400") && m.contains("unknown field"))
         );
@@ -517,7 +522,7 @@ mod tests {
     #[test]
     fn key_sent_only_as_bearer() {
         let (base, log) = server(vec![models(), chat("{}"), chat("{}")]);
-        let r = OpenAiChat::new(&base, "gemma4:e4b", Some("sk-test")).unwrap();
+        let r = ChatCompletions::new(&base, "gemma4:e4b", Some("sk-test")).unwrap();
         r.preflight().unwrap();
         r.read(b"x").unwrap();
         assert_eq!(log.lock().unwrap().len(), 3);
