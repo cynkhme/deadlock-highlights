@@ -44,6 +44,10 @@ struct Args {
     /// At most this many clips, best first.
     #[arg(long)]
     clips_max: Option<usize>,
+    /// Audio tracks copied into clips, comma-separated: names, or positions among the
+    /// file's audio tracks from 1 [default: all].
+    #[arg(long, value_delimiter = ',')]
+    audio: Vec<String>,
 }
 
 /// The run completed but placed no match; the reasons are in `highlights.json`.
@@ -109,6 +113,7 @@ fn cli(args: Args) -> Result<u8, Error> {
     cfg.parallel = args.parallel;
     cfg.clips_min_score = args.clips_min_score;
     cfg.clips_max = args.clips_max;
+    cfg.audio = args.audio;
     cfg.progress = Some(Arc::new(|p| {
         if let Some(line) = progress_line(&p) {
             eprintln!("{line}");

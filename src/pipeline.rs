@@ -21,7 +21,7 @@ use crate::output::{
 };
 use crate::timeline::align::{GameStart, HistoryMatch, align_readings};
 use crate::timeline::place::{pause_mismatch, vod_start};
-use crate::video::{GRID_S, Probe, cut_clip, keyframes};
+use crate::video::{AudioTrack, GRID_S, Probe, cut_clip, keyframes, select_audio};
 
 fn notify(cfg: &Config, p: Progress) {
     if let Some(f) = &cfg.progress {
@@ -31,25 +31,27 @@ fn notify(cfg: &Config, p: Progress) {
 
 /// Every stage after the probe.
 pub(crate) fn run(cfg: &Config, reader: &dyn HudReader, probe: &Probe) -> Result<Output> {
-    begin(cfg, probe)?;
+    let audio = begin(cfg, probe)?;
     let mut source = ApiSource::new(cfg, None)?;
     let history = prepare(cfg, probe, &mut source)?;
     let frames = read_vod(cfg, probe, reader)?;
-    place(cfg, &mut source, probe, history, &frames)
+    place(cfg, &mut source, probe, &audio, history, &frames)
 }
 
-/// Reports the probe and creates the output directory.
-fn begin(cfg: &Config, probe: &Probe) -> Result<()> {
+/// Reports the probe, picks the clips' audio tracks and creates the output directory.
+fn begin(cfg: &Config, probe: &Probe) -> Result<Vec<AudioTrack>> {
     notify(
         cfg,
         Progress::Probed {
             duration_s: probe.duration_s,
         },
     );
+    let audio = select_audio(&probe.audio, &cfg.audio)?;
     std::fs::create_dir_all(&cfg.out).map_err(|source| Error::Io {
         path: cfg.out.clone(),
         source,
-    })
+    })?;
+    Ok(audio)
 }
 
 /// The match history from `source`, reported once loaded.
@@ -71,6 +73,7 @@ fn place(
     cfg: &Config,
     source: &mut dyn MatchSource,
     probe: &Probe,
+    audio: &[AudioTrack],
     history: History,
     frames: &[FrameReading],
 ) -> Result<Output> {
@@ -111,7 +114,7 @@ fn place(
         .any(|m| matches!(m.status, MatchStatus::Unavailable { .. } | MatchStatus::NotIngested))
         // The history may not list a match that started after its newest entry yet.
         || unmatched_starts.iter().any(|s| s.last_reading + offset as f64 > newest as f64);
-    let clips = clips(cfg, &highlights);
+    let clips = clips(cfg, audio, &highlights);
     Ok(Output {
         schema: SCHEMA,
         vod: VodInfo {
@@ -270,8 +273,8 @@ fn keep_readings(cfg: &Config, key: &cache::CacheKey, r: &[FrameReading]) {
 
 /// Cuts the windows at or above the score threshold, best first, replacing a clip of the
 /// same name: a window may have changed since. A clip that cannot be cut is left out with
-/// a warning, so the run keeps its windows.
-fn clips(cfg: &Config, ranked: &[Highlight]) -> Vec<PathBuf> {
+/// a warning, so the run keeps its windows. Each clip holds the VOD's video and `audio`.
+fn clips(cfg: &Config, audio: &[AudioTrack], ranked: &[Highlight]) -> Vec<PathBuf> {
     let ext = cfg
         .vod
         .extension()
@@ -290,7 +293,7 @@ fn clips(cfg: &Config, ranked: &[Highlight]) -> Vec<PathBuf> {
                 path: dir.clone(),
                 source,
             })
-            .and_then(|()| cut_clip(&cfg.vod, h.start, h.end, &dest));
+            .and_then(|()| cut_clip(&cfg.vod, h.start, h.end, audio, &dest));
         if let Err(e) = cut {
             notify(
                 cfg,
@@ -345,6 +348,7 @@ mod tests {
             height: 1080,
             size: 1,
             mtime: 0,
+            audio: Vec::new(),
         }
     }
 
@@ -422,10 +426,10 @@ mod tests {
 
     /// The run after the read, on `readings` in place of the VOD's.
     fn run_on(f: &Fixture, probe: &Probe, readings: &[FrameReading]) -> Result<Output> {
-        begin(&f.cfg, probe)?;
+        let audio = begin(&f.cfg, probe)?;
         let mut source = ApiSource::new(&f.cfg, Some(Box::new(f.api.clone())))?;
         let history = prepare(&f.cfg, probe, &mut source)?;
-        place(&f.cfg, &mut source, probe, history, readings)
+        place(&f.cfg, &mut source, probe, &audio, history, readings)
     }
 
     #[test]
@@ -725,6 +729,70 @@ mod tests {
                 .requests()
                 .iter()
                 .any(|p| p.starts_with("/v1/matches/"))
+        );
+    }
+
+    #[test]
+    fn unknown_audio_track_fails_before_any_request() {
+        let mut f = fixture(&json!([hist(1, A + 50, 1800, 1)]));
+        f.cfg.audio = vec!["Mic".into()];
+        let mut p = probe(3600.0);
+        p.audio = vec![AudioTrack {
+            index: 0,
+            name: Some("Mix".into()),
+        }];
+        let reader = Refused::default();
+        let e = super::run(&f.cfg, &reader, &p).unwrap_err();
+        assert!(
+            matches!(&e, Error::Usage(m) if m.contains("\"Mic\"")),
+            "{e:?}"
+        );
+        assert_eq!(reader.0.load(Ordering::SeqCst), 0);
+        assert_eq!(f.api.requests(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn clips_keep_the_wanted_audio_tracks() {
+        if !have_ffmpeg() {
+            return;
+        }
+        let mut f = fixture(&json!([hist(1, A, 1800, 1)]));
+        let st = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=320x240:rate=10")
+            .args(["-f", "lavfi", "-i", "sine=frequency=300"])
+            .args(["-f", "lavfi", "-i", "sine=frequency=600"])
+            .args(["-map", "0:v", "-map", "1:a", "-map", "2:a"])
+            .args([
+                "-metadata:s:a:0",
+                "title=Mix",
+                "-metadata:s:a:1",
+                "title=Mic",
+            ])
+            .args([
+                "-t", "12", "-c:v", "libx264", "-g", "10", "-pix_fmt", "yuv420p",
+            ])
+            .arg(&f.cfg.vod)
+            .status()
+            .unwrap();
+        assert!(st.success());
+        f.cfg.clips_max = None;
+        f.cfg.audio = vec!["mic".into()];
+        cache_match_combat(&f, 1, 7, false, &[10, 11], &[]);
+        let readings = vec![
+            reading(1.0, "0:01"),
+            reading(2.0, "0:02"),
+            reading(3.0, "0:03"),
+        ];
+        let p = crate::video::probe(&f.cfg.vod).unwrap();
+        let o = run_on(&f, &p, &readings).unwrap();
+        let clip = crate::video::probe(&o.clips[0]).unwrap();
+        assert_eq!(
+            clip.audio
+                .iter()
+                .map(|t| t.name.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Mic")]
         );
     }
 

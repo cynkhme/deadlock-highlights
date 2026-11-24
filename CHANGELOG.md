@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clips keep all of the VOD's audio tracks with their names, where ffmpeg kept only the one it picked. `--audio` keeps only the named tracks, by name or position.
 - Every run cuts its clips again and replaces files of the same name, so a clip whose window grew is no longer kept as first cut.
 - A VOD that starts after a match's first pause no longer marks that match's pauses as mismatched in `highlights.json`.
 - The rejected-offset hint and the no-overlap error name where the VOD's start came from, `--vod-start` or `info.json`, instead of always telling to pass `--vod-start`.

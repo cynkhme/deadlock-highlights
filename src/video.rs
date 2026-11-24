@@ -17,6 +17,15 @@ pub(crate) struct Probe {
     pub height: u32,
     pub size: u64,
     pub mtime: i64,
+    pub audio: Vec<AudioTrack>,
+}
+
+/// An audio stream of the VOD.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AudioTrack {
+    /// Position among the file's audio streams, from 0.
+    pub index: usize,
+    pub name: Option<String>,
 }
 
 /// A keyframe's clock band: gray for the gate, a 2x PNG for the reader.
@@ -59,13 +68,21 @@ pub(crate) fn probe(vod: &Path) -> Result<Probe> {
                 "-show_format",
                 "-show_streams",
             ])
-            .args(["-select_streams", "v:0"])
             .arg(vod),
         &what,
     )?;
     let v: serde_json::Value = serde_json::from_slice(&out)
         .map_err(|e| Error::Ffmpeg(format!("{what}: ffprobe output: {e}")))?;
-    let stream = &v["streams"][0];
+    let streams = v["streams"].as_array().map_or(&[][..], Vec::as_slice);
+    let of_type = |t: &'static str| streams.iter().filter(move |s| s["codec_type"] == t);
+    let stream = of_type("video").next().unwrap_or(&serde_json::Value::Null);
+    let audio = of_type("audio")
+        .enumerate()
+        .map(|(index, s)| AudioTrack {
+            index,
+            name: track_name(&s["tags"]),
+        })
+        .collect();
     let dim = |k: &str| {
         stream[k]
             .as_u64()
@@ -92,6 +109,20 @@ pub(crate) fn probe(vod: &Path) -> Result<Probe> {
         height,
         size: meta.len(),
         mtime,
+        audio,
+    })
+}
+
+/// A stream's title: `title`, or `name` as OBS and ffmpeg's MP4 demuxer give it, in any case.
+fn track_name(tags: &serde_json::Value) -> Option<String> {
+    let tags = tags.as_object()?;
+    ["title", "name"].iter().find_map(|key| {
+        tags.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .and_then(|(_, v)| v.as_str())
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned)
     })
 }
 
@@ -222,8 +253,76 @@ pub(crate) fn keyframes(
         .collect()
 }
 
-/// Stream-copies [start, end) of the VOD to `dest`; a partial file never takes its name.
-pub(crate) fn cut_clip(vod: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
+/// Stream-copies [start, end) of the VOD's first video stream and `audio` to `dest`, each
+/// audio track titled with its name; a partial file never takes its name.
+/// The tracks `wanted` names, in its order: each a 1-based position, or else a name in any
+/// case. None wanted is every track.
+///
+/// # Errors
+///
+/// [`Error::Usage`] for a position or name the VOD lacks, a name on several tracks, or a
+/// track wanted twice; the message lists the VOD's tracks.
+pub(crate) fn select_audio(tracks: &[AudioTrack], wanted: &[String]) -> Result<Vec<AudioTrack>> {
+    if wanted.is_empty() {
+        return Ok(tracks.to_vec());
+    }
+    let listed = || {
+        if tracks.is_empty() {
+            return "the VOD has no audio track".to_owned();
+        }
+        let list: Vec<String> = tracks
+            .iter()
+            .map(|t| match &t.name {
+                Some(n) => format!("{} {n:?}", t.index + 1),
+                None => format!("{} (no name)", t.index + 1),
+            })
+            .collect();
+        format!("the VOD's audio tracks are {}", list.join(", "))
+    };
+    let mut picked: Vec<AudioTrack> = Vec::new();
+    for w in wanted {
+        let w = w.trim();
+        let track = if let Ok(n) = w.parse::<usize>() {
+            n.checked_sub(1)
+                .and_then(|i| tracks.get(i))
+                .ok_or_else(|| Error::Usage(format!("no audio track {n}: {}", listed())))?
+        } else {
+            let found: Vec<&AudioTrack> = tracks
+                .iter()
+                .filter(|t| t.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(w)))
+                .collect();
+            match found[..] {
+                [t] => t,
+                [] => {
+                    return Err(Error::Usage(format!("no audio track {w:?}: {}", listed())));
+                }
+                _ => {
+                    let at: Vec<String> = found.iter().map(|t| (t.index + 1).to_string()).collect();
+                    return Err(Error::Usage(format!(
+                        "audio tracks {} are all named {w:?}; pick one by position",
+                        at.join(" and ")
+                    )));
+                }
+            }
+        };
+        if picked.contains(track) {
+            return Err(Error::Usage(format!(
+                "audio track {} is wanted twice",
+                track.index + 1
+            )));
+        }
+        picked.push(track.clone());
+    }
+    Ok(picked)
+}
+
+pub(crate) fn cut_clip(
+    vod: &Path,
+    start: f64,
+    end: f64,
+    audio: &[AudioTrack],
+    dest: &Path,
+) -> Result<()> {
     let dir = dest.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(|e| Error::Io {
         path: dir.to_path_buf(),
@@ -245,14 +344,9 @@ pub(crate) fn cut_clip(vod: &Path, start: f64, end: f64, dest: &Path) -> Result<
                 "-i",
             ])
             .arg(vod)
-            .args([
-                "-t",
-                &format!("{:.3}", end - start),
-                "-c",
-                "copy",
-                "-avoid_negative_ts",
-                "make_zero",
-            ])
+            .args(["-t", &format!("{:.3}", end - start), "-map", "0:v:0"])
+            .args(audio_args(audio))
+            .args(["-c", "copy", "-avoid_negative_ts", "make_zero"])
             .arg(&part),
         &vod.display().to_string(),
     );
@@ -264,6 +358,18 @@ pub(crate) fn cut_clip(vod: &Path, start: f64, end: f64, dest: &Path) -> Result<
         path: dest.to_path_buf(),
         source: e,
     })
+}
+
+/// A map per track; a title per named one, which the MP4 muxer writes as the track's name.
+fn audio_args(audio: &[AudioTrack]) -> Vec<String> {
+    let mut args = Vec::new();
+    for (out, t) in audio.iter().enumerate() {
+        args.extend(["-map".to_owned(), format!("0:a:{}", t.index)]);
+        if let Some(n) = &t.name {
+            args.extend([format!("-metadata:s:a:{out}"), format!("title={n}")]);
+        }
+    }
+    args
 }
 
 #[cfg(test)]
@@ -417,7 +523,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let v = video(d.path(), "a.mp4", "testsrc2=size=640x360:rate=10", 60);
         let dest = d.path().join("clips").join("1-10.mp4");
-        cut_clip(&v, 10.0, 30.0, &dest).unwrap();
+        cut_clip(&v, 10.0, 30.0, &[], &dest).unwrap();
         let p = probe(&dest).unwrap();
         assert!((p.duration_s - 20.0).abs() <= 2.0, "{}", p.duration_s);
         let names: Vec<_> = std::fs::read_dir(dest.parent().unwrap())
@@ -425,5 +531,152 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(names, ["1-10.mp4"]);
+    }
+
+    /// A synthetic video with one audio stream per entry of `names`, titled where given.
+    fn video_with_audio(dir: &Path, name: &str, names: &[Option<&str>]) -> std::path::PathBuf {
+        let out = dir.join(name);
+        let mut c = Command::new("ffmpeg");
+        c.args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=320x240:rate=10");
+        for i in 0..names.len() {
+            c.args(["-f", "lavfi", "-i"])
+                .arg(format!("sine=frequency={}", 300 * (i + 1)));
+        }
+        c.args(["-map", "0:v"]);
+        for (i, n) in names.iter().enumerate() {
+            c.args(["-map", &format!("{}:a", i + 1)]);
+            if let Some(n) = n {
+                c.arg(format!("-metadata:s:a:{i}"))
+                    .arg(format!("title={n}"));
+            }
+        }
+        let st = c
+            .args([
+                "-t", "20", "-c:v", "libx264", "-g", "10", "-pix_fmt", "yuv420p",
+            ])
+            .args(["-c:a", "aac"])
+            .arg(&out)
+            .status()
+            .unwrap();
+        assert!(st.success());
+        out
+    }
+
+    fn names(tracks: &[AudioTrack]) -> Vec<Option<&str>> {
+        tracks.iter().map(|t| t.name.as_deref()).collect()
+    }
+
+    fn track(index: usize, name: Option<&str>) -> AudioTrack {
+        AudioTrack {
+            index,
+            name: name.map(Into::into),
+        }
+    }
+
+    fn select(tracks: &[AudioTrack], wanted: &[&str]) -> Result<Vec<AudioTrack>> {
+        let wanted: Vec<String> = wanted.iter().map(|&s| s.to_owned()).collect();
+        select_audio(tracks, &wanted)
+    }
+
+    #[test]
+    fn probe_lists_audio_tracks_in_file_order() {
+        if !have_ffmpeg() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let v = video_with_audio(d.path(), "a.mp4", &[Some("Mix"), None, Some("Mic")]);
+        let p = probe(&v).unwrap();
+        assert_eq!(names(&p.audio), [Some("Mix"), None, Some("Mic")]);
+        assert_eq!(
+            p.audio.iter().map(|t| t.index).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        let silent = video(d.path(), "s.mp4", "testsrc2=size=320x240:rate=10", 5);
+        assert_eq!(probe(&silent).unwrap().audio, []);
+    }
+
+    #[test]
+    fn select_audio_by_name_or_position() {
+        let tracks = [
+            track(0, Some("Mix")),
+            track(1, Some("Game")),
+            track(2, None),
+        ];
+        assert_eq!(select(&tracks, &[]).unwrap(), tracks);
+        assert_eq!(
+            select(&tracks, &["game", " 3", "1"]).unwrap(),
+            [tracks[1].clone(), tracks[2].clone(), tracks[0].clone()]
+        );
+        assert_eq!(select(&[], &[]).unwrap(), []);
+    }
+
+    #[test]
+    fn select_audio_refuses_what_the_vod_lacks() {
+        let tracks = [
+            track(0, Some("Mix")),
+            track(1, Some("Game")),
+            track(2, Some("game")),
+        ];
+        let cases: [(&[AudioTrack], &[&str], &str); 6] = [
+            (&tracks, &["Mic"], "\"Mic\""),
+            (&tracks, &["4"], "4"),
+            (&tracks, &["0"], "0"),
+            (&tracks, &["Game"], "2 and 3"),
+            (&tracks, &["Mix", "1"], "twice"),
+            (&[], &["1"], "no audio"),
+        ];
+        for (tracks, wanted, needle) in cases {
+            let e = select(tracks, wanted).unwrap_err();
+            assert!(
+                matches!(&e, Error::Usage(m) if m.contains(needle) && !m.contains("--")),
+                "{wanted:?}: {e}"
+            );
+        }
+        let e = select(&tracks, &["Mic"]).unwrap_err().to_string();
+        assert!(
+            e.contains("1 \"Mix\", 2 \"Game\", 3 \"game\""),
+            "lists the tracks: {e}"
+        );
+    }
+
+    #[test]
+    fn cut_clip_keeps_every_audio_track_and_its_name() {
+        if !have_ffmpeg() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        for ext in ["mp4", "mkv"] {
+            let v = video_with_audio(
+                d.path(),
+                &format!("a.{ext}"),
+                &[Some("Mix"), None, Some("Mic")],
+            );
+            let p = probe(&v).unwrap();
+            let dest = d.path().join(format!("all.{ext}"));
+            cut_clip(&v, 5.0, 10.0, &p.audio, &dest).unwrap();
+            assert_eq!(
+                names(&probe(&dest).unwrap().audio),
+                names(&p.audio),
+                "{ext}"
+            );
+        }
+    }
+
+    #[test]
+    fn cut_clip_keeps_selected_tracks_in_their_order() {
+        if !have_ffmpeg() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let v = video_with_audio(d.path(), "a.mp4", &[Some("Mix"), Some("Game"), Some("Mic")]);
+        let p = probe(&v).unwrap();
+        let dest = d.path().join("some.mp4");
+        let picked = select(&p.audio, &["Mic", "Mix"]).unwrap();
+        cut_clip(&v, 5.0, 10.0, &picked, &dest).unwrap();
+        assert_eq!(
+            names(&probe(&dest).unwrap().audio),
+            [Some("Mic"), Some("Mix")]
+        );
     }
 }
