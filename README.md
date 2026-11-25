@@ -52,6 +52,7 @@ The clock is looked for in a 360x64 band at the top centre of the frame, after t
 - An assist is counted when the streamer was alive within 2500 units of the victim in the 3 s before a teammate's kill. Checked against demo files of 9 matches of one player, it finds 83% of the assists, and 93% of those it counts are real.
 - Combat is read from `combat_type`, a path field deadlock-api does not document; value 1 is taken as combat with players. On the 6 matches of the measured VOD, 92% of the health drops of 10 or more between two path samples fell on value 1, and in 85% of a sample of value-1 seconds a live enemy was within 2500 units.
 - A duo partner's account gives the same matches, seen from the partner's slot. The alignment cannot tell the two apart, so `--account` must be the streamer's.
+- MP4 track names, such as the ones OBS writes, are read and written by ffmpeg 9.0.2 and not by 8.0.1. With an older ffmpeg, an MP4's tracks have no names: `--audio` takes positions, and clips carry no track names. MKV track names work with both.
 - Only standard-mode matches are processed: in Street Brawl, for one, the clock restarts every round. Matches under 3 minutes are remakes and are skipped.
 - A match deadlock-api.com has not ingested yet, or that it rate-limits, is listed as such. A later rerun requests it again.
 

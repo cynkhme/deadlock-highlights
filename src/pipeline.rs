@@ -757,6 +757,8 @@ mod tests {
             return;
         }
         let mut f = fixture(&json!([hist(1, A, 1800, 1)]));
+        // MKV: ffmpeg 8 neither writes nor reads MP4 track names.
+        f.cfg.vod.set_extension("mkv");
         let st = std::process::Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
             .arg("testsrc2=size=320x240:rate=10")

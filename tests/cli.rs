@@ -192,7 +192,7 @@ fn unknown_audio_track_is_2_and_lists_the_tracks() {
         return;
     }
     let d = tempfile::tempdir().unwrap();
-    let v = d.path().join("v.mp4");
+    let v = d.path().join("v.mkv");
     let st = Command::new("ffmpeg")
         .args([
             "-v",

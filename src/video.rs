@@ -585,7 +585,8 @@ mod tests {
             return;
         }
         let d = tempfile::tempdir().unwrap();
-        let v = video_with_audio(d.path(), "a.mp4", &[Some("Mix"), None, Some("Mic")]);
+        // MKV: ffmpeg 8 neither writes nor reads MP4 track names.
+        let v = video_with_audio(d.path(), "a.mkv", &[Some("Mix"), None, Some("Mic")]);
         let p = probe(&v).unwrap();
         assert_eq!(names(&p.audio), [Some("Mix"), None, Some("Mic")]);
         assert_eq!(
@@ -669,9 +670,9 @@ mod tests {
             return;
         }
         let d = tempfile::tempdir().unwrap();
-        let v = video_with_audio(d.path(), "a.mp4", &[Some("Mix"), Some("Game"), Some("Mic")]);
+        let v = video_with_audio(d.path(), "a.mkv", &[Some("Mix"), Some("Game"), Some("Mic")]);
         let p = probe(&v).unwrap();
-        let dest = d.path().join("some.mp4");
+        let dest = d.path().join("some.mkv");
         let picked = select(&p.audio, &["Mic", "Mix"]).unwrap();
         cut_clip(&v, 5.0, 10.0, &picked, &dest).unwrap();
         assert_eq!(
