@@ -29,6 +29,10 @@ pub struct Config {
     /// Windows scoring at least this are cut as clips.
     pub clips_min_score: u32,
     pub clips_max: Option<usize>,
+    /// The VOD's audio tracks copied into clips, in this order: each a 1-based position
+    /// among the file's audio streams, or else a track name in any case. Empty copies
+    /// every track.
+    pub audio: Vec<String>,
     pub progress: Option<Arc<dyn Fn(Progress) + Send + Sync>>,
     pub(crate) deadlock_api_url: String,
 }
@@ -63,6 +67,7 @@ impl Config {
             parallel: Config::DEFAULT_PARALLEL,
             clips_min_score: Config::DEFAULT_CLIPS_MIN_SCORE,
             clips_max: None,
+            audio: Vec::new(),
             progress: None,
             deadlock_api_url: DEADLOCK_API_URL.into(),
         }

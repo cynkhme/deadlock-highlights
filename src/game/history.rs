@@ -95,6 +95,7 @@ mod tests {
             height: 1080,
             size: 1,
             mtime: 0,
+            audio: Vec::new(),
         };
         (d, cfg, probe, api)
     }

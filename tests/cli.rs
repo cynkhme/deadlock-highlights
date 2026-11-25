@@ -184,3 +184,44 @@ fn old_highlights_removed_when_a_run_starts() {
     check(c, 1, "ffmpeg");
     assert!(!out.join("highlights.json").exists());
 }
+
+#[test]
+fn unknown_audio_track_is_2_and_lists_the_tracks() {
+    let have_ffmpeg = Command::new("ffmpeg").arg("-version").output().is_ok();
+    if !have_ffmpeg {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let v = d.path().join("v.mkv");
+    let st = Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x240:rate=10",
+        ])
+        .args(["-f", "lavfi", "-i", "sine", "-map", "0:v", "-map", "1:a"])
+        .args(["-metadata:s:a:0", "title=Mix", "-t", "2"])
+        .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        .arg(&v)
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let c = dlhl(&[
+        v.to_str().unwrap(),
+        "--account",
+        "1",
+        "--server",
+        "http://127.0.0.1:9/v1",
+        "--audio",
+        "Mix,Mic",
+    ]);
+    check(
+        c,
+        2,
+        "no audio track \"Mic\": the VOD's audio tracks are 1 \"Mix\"",
+    );
+}

@@ -22,7 +22,7 @@ Each read sends `temperature: 0`, `max_tokens: 64` and `reasoning_effort: "none"
 Results go to `<VOD>.dlhl/`, or to `--out`:
 
 - `highlights.json`: every match with its status, the game starts that matched no match, and every window, best first. It is removed when a run starts and written when the run completes.
-- `clips/<match id>-<VOD second>.<ext>`: windows with a score of at least `--clips-min-score` (default 3: for example an own kill and an assist, or three assists), stream-copied. `--clips-max` caps the count. Every run cuts its clips again and replaces files of the same name, since a window may have changed. A clip that ffmpeg cannot cut is left out with a warning, and a file left from an earlier cut stays as it was. dlhl never deletes clips.
+- `clips/<match id>-<VOD second>.<ext>`: windows with a score of at least `--clips-min-score` (default 3: for example an own kill and an assist, or three assists), stream-copied. `--clips-max` caps the count. Every run cuts its clips again and replaces files of the same name, since a window may have changed. A clip that ffmpeg cannot cut is left out with a warning, and a file left from an earlier cut stays as it was. dlhl never deletes clips. A clip holds the VOD's video and all its audio tracks with their names. `--audio` keeps only the tracks it names, in its order: `--audio Game,Mic` by the names the recorder wrote, in any case, or `--audio 2` by position among the file's audio tracks. A position counts only the tracks in the file: OBS's `Track3` is the second when track 2 is not recorded. A name or position the VOD lacks stops the run before any request, with the VOD's tracks listed.
 - `readings/`: clock readings per VOD and settings, so a rerun skips the model and needs no server. A read without any clock is not kept. It may be deleted.
 - `matches/`: match metadata from deadlock-api.com, so a rerun does not request it again.
 - `history.json`: the account's match history from this run.
@@ -52,6 +52,7 @@ The clock is looked for in a 360x64 band at the top centre of the frame, after t
 - An assist is counted when the streamer was alive within 2500 units of the victim in the 3 s before a teammate's kill. Checked against demo files of 9 matches of one player, it finds 83% of the assists, and 93% of those it counts are real.
 - Combat is read from `combat_type`, a path field deadlock-api does not document; value 1 is taken as combat with players. On the 6 matches of the measured VOD, 92% of the health drops of 10 or more between two path samples fell on value 1, and in 85% of a sample of value-1 seconds a live enemy was within 2500 units.
 - A duo partner's account gives the same matches, seen from the partner's slot. The alignment cannot tell the two apart, so `--account` must be the streamer's.
+- MP4 track names, such as the ones OBS writes, are read and written by ffmpeg 9.0.2 and not by 8.0.1. With an older ffmpeg, an MP4's tracks have no names: `--audio` takes positions, and clips carry no track names. MKV track names work with both.
 - Only standard-mode matches are processed: in Street Brawl, for one, the clock restarts every round. Matches under 3 minutes are remakes and are skipped.
 - A match deadlock-api.com has not ingested yet, or that it rate-limits, is listed as such. A later rerun requests it again.
 
